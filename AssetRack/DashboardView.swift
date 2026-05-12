@@ -7,9 +7,11 @@ struct DashboardView: View {
     @Query(sort: \NetWorthSnapshot.recordedAt) private var snapshots: [NetWorthSnapshot]
 
     @State private var vm = DashboardViewModel()
+    @State private var fx = FXRateService()
     @State private var selectedSnapshot: NetWorthSnapshot?
     @State private var showingAllAccounts = false
     @State private var showingAddAccount = false
+    @State private var showingSettings = false
     @State private var accountToEdit: Account?
 
     var body: some View {
@@ -17,10 +19,11 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     NetWorthHeroCard(
-                        netWorth: vm.netWorth(from: accounts),
-                        totalAssets: vm.totalAssets(from: accounts),
-                        totalLiabilities: vm.totalLiabilities(from: accounts),
-                        delta: vm.monthOverMonthDelta(from: snapshots)
+                        netWorth: vm.netWorth(from: accounts, fx: fx),
+                        totalAssets: vm.totalAssets(from: accounts, fx: fx),
+                        totalLiabilities: vm.totalLiabilities(from: accounts, fx: fx),
+                        delta: vm.monthOverMonthDelta(from: snapshots),
+                        currency: fx.baseCurrency
                     )
 
                     NetWorthChartCard(
@@ -42,7 +45,11 @@ struct DashboardView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
+            .task { await fx.fetchIfNeeded() }
             .navigationBarTitleDisplayMode(.large)
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(fx: fx)
+            }
             .sheet(isPresented: $showingAddAccount) {
                 AddEditAccountView()
             }
@@ -50,6 +57,13 @@ struct DashboardView: View {
                 AddEditAccountView(editingAccount: account)
             }
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showingAddAccount = true
@@ -69,6 +83,7 @@ struct NetWorthHeroCard: View {
     let totalAssets: Double
     let totalLiabilities: Double
     let delta: Double?
+    var currency: String = "USD"
 
     var body: some View {
         VStack(spacing: 6) {
@@ -76,7 +91,7 @@ struct NetWorthHeroCard: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(netWorth.currencyFormatted())
+            Text(netWorth.currencyFormatted(code: currency))
                 .font(.system(size: 42, weight: .bold, design: .rounded))
                 .contentTransition(.numericText())
                 .animation(.spring(duration: 0.4), value: netWorth)
@@ -97,7 +112,7 @@ struct NetWorthHeroCard: View {
                     Text("Assets")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(totalAssets.currencyFormatted())
+                    Text(totalAssets.currencyFormatted(code: currency))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.green)
                 }
@@ -106,7 +121,7 @@ struct NetWorthHeroCard: View {
                     Text("Liabilities")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(totalLiabilities.currencyFormatted())
+                    Text(totalLiabilities.currencyFormatted(code: currency))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.red)
                 }
@@ -357,7 +372,7 @@ struct AccountRow: View {
 
             Spacer()
 
-            Text(account.currentBalance.currencyFormatted())
+            Text(account.currentBalance.currencyFormatted(code: account.currency))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(account.isLiability ? .red : .primary)
         }

@@ -6,16 +6,18 @@ final class DashboardViewModel {
 
     // MARK: - Net worth
 
-    func netWorth(from accounts: [Account]) -> Double {
-        accounts.reduce(0) { $0 + $1.signedBalance }
+    func netWorth(from accounts: [Account], fx: FXRateService) -> Double {
+        accounts.reduce(0) { $0 + fx.toBase($1.signedBalance, currency: $1.currency) }
     }
 
-    func totalAssets(from accounts: [Account]) -> Double {
-        accounts.filter { !$0.isLiability }.reduce(0) { $0 + $1.currentBalance }
+    func totalAssets(from accounts: [Account], fx: FXRateService) -> Double {
+        accounts.filter { !$0.isLiability }
+            .reduce(0) { $0 + fx.toBase($1.currentBalance, currency: $1.currency) }
     }
 
-    func totalLiabilities(from accounts: [Account]) -> Double {
-        accounts.filter { $0.isLiability }.reduce(0) { $0 + $1.currentBalance }
+    func totalLiabilities(from accounts: [Account], fx: FXRateService) -> Double {
+        accounts.filter { $0.isLiability }
+            .reduce(0) { $0 + fx.toBase($1.currentBalance, currency: $1.currency) }
     }
 
     // MARK: - Chart

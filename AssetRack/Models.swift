@@ -80,13 +80,13 @@ final class Account: Identifiable {
 
     var signedBalance: Double { isLiability ? -currentBalance : currentBalance }
 
-    init(name: String, type: AccountType, balance: Double, institution: String = "") {
+    init(name: String, type: AccountType, balance: Double, institution: String = "", currency: String = "USD") {
         self.id = UUID()
         self.name = name
         self.typeRaw = type.rawValue
         self.currentBalance = balance
         self.institution = institution
-        self.currency = "USD"
+        self.currency = currency
         self.createdAt = Date()
         self.updatedAt = Date()
     }

@@ -12,7 +12,31 @@ struct AddEditAccountView: View {
     @State private var institution: String = ""
     @State private var selectedType: AccountType = .checking
     @State private var balanceText: String = ""
+    @State private var selectedCurrency: String = "USD"
     @State private var showingDeleteConfirm = false
+
+    static let currencies: [(code: String, label: String)] = [
+        ("USD", "USD — US Dollar"),
+        ("EUR", "EUR — Euro"),
+        ("GBP", "GBP — British Pound"),
+        ("CAD", "CAD — Canadian Dollar"),
+        ("AUD", "AUD — Australian Dollar"),
+        ("CHF", "CHF — Swiss Franc"),
+        ("JPY", "JPY — Japanese Yen"),
+        ("CNY", "CNY — Chinese Yuan"),
+        ("INR", "INR — Indian Rupee"),
+        ("SGD", "SGD — Singapore Dollar"),
+        ("HKD", "HKD — Hong Kong Dollar"),
+        ("NZD", "NZD — New Zealand Dollar"),
+        ("MXN", "MXN — Mexican Peso"),
+        ("BRL", "BRL — Brazilian Real"),
+        ("KRW", "KRW — South Korean Won"),
+        ("SEK", "SEK — Swedish Krona"),
+        ("NOK", "NOK — Norwegian Krone"),
+        ("DKK", "DKK — Danish Krone"),
+        ("AED", "AED — UAE Dirham"),
+        ("ZAR", "ZAR — South African Rand"),
+    ]
 
     private var isEditing: Bool { editingAccount != nil }
 
@@ -43,8 +67,14 @@ struct AddEditAccountView: View {
                 }
 
                 Section(selectedType.isLiability ? "Amount Owed" : "Current Balance") {
+                    Picker("Currency", selection: $selectedCurrency) {
+                        ForEach(Self.currencies, id: \.code) { currency in
+                            Text(currency.label).tag(currency.code)
+                        }
+                    }
+
                     HStack {
-                        Text("$")
+                        Text(currencySymbol(for: selectedCurrency))
                             .foregroundStyle(.secondary)
                         TextField("0", text: $balanceText)
                             .keyboardType(.decimalPad)
@@ -149,11 +179,19 @@ struct AddEditAccountView: View {
 
     // MARK: - Actions
 
+    private func currencySymbol(for code: String) -> String {
+        let locale = Locale.availableIdentifiers
+            .map { Locale(identifier: $0) }
+            .first { $0.currency?.identifier == code }
+        return locale?.currencySymbol ?? code
+    }
+
     private func prefill() {
         guard let account = editingAccount else { return }
         name = account.name
         institution = account.institution
         selectedType = account.type
+        selectedCurrency = account.currency
         balanceText = String(format: "%.2f", account.currentBalance)
     }
 
@@ -165,6 +203,7 @@ struct AddEditAccountView: View {
             account.institution = institution
             account.type = selectedType
             account.currentBalance = balance
+            account.currency = selectedCurrency
             account.updatedAt = Date()
 
             let snap = BalanceSnapshot(balance: balance)
@@ -175,7 +214,8 @@ struct AddEditAccountView: View {
                 name: name.trimmingCharacters(in: .whitespaces),
                 type: selectedType,
                 balance: balance,
-                institution: institution.trimmingCharacters(in: .whitespaces)
+                institution: institution.trimmingCharacters(in: .whitespaces),
+                currency: selectedCurrency
             )
             modelContext.insert(account)
 
