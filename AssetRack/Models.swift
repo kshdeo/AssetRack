@@ -35,6 +35,13 @@ enum AccountType: String, CaseIterable, Codable {
 
     var isLiability: Bool { category == .liabilities }
 
+    var supportsTicker: Bool {
+        switch self {
+        case .brokerage: return true
+        default: return false
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .checking:    return "building.columns"
@@ -67,6 +74,12 @@ final class Account: Identifiable {
     var institution: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+
+    var tickerSymbol: String = ""
+    var quantity: Double = 0.0
+    var lastPrice: Double = 0.0
+
+    var isTickerTracked: Bool { !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty && quantity > 0 }
 
     @Relationship(deleteRule: .cascade)
     var balanceHistory: [BalanceSnapshot] = []

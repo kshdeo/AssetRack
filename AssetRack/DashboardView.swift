@@ -6,8 +6,10 @@ struct DashboardView: View {
     @Query private var accounts: [Account]
     @Query(sort: \NetWorthSnapshot.recordedAt) private var snapshots: [NetWorthSnapshot]
 
+    @Environment(\.modelContext) private var modelContext
     @State private var vm = DashboardViewModel()
     @State private var fx = FXRateService()
+    @State private var ticker = TickerService()
     @State private var selectedSnapshot: NetWorthSnapshot?
     @State private var showingAllAccounts = false
     @State private var showingAddAccount = false
@@ -45,15 +47,18 @@ struct DashboardView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
-            .task { await fx.fetchIfNeeded() }
+            .task {
+                await fx.fetchIfNeeded()
+                await ticker.fetchIfNeeded(context: modelContext)
+            }
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showingSettings) {
                 SettingsView(fx: fx)
             }
-            .sheet(isPresented: $showingAddAccount) {
+            .sheet(isPresented: $showingAddAccount, onDismiss: refreshTickers) {
                 AddEditAccountView()
             }
-            .sheet(item: $accountToEdit) { account in
+            .sheet(item: $accountToEdit, onDismiss: refreshTickers) { account in
                 AddEditAccountView(editingAccount: account)
             }
             .toolbar {
@@ -72,6 +77,17 @@ struct DashboardView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - DashboardView helpers
+
+extension DashboardView {
+    func refreshTickers() {
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            await ticker.fetch(context: modelContext)
         }
     }
 }
@@ -365,9 +381,16 @@ struct AccountRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name)
                     .font(.subheadline.weight(.medium))
-                Text(account.type.displayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(account.type.displayName)
+                    if account.isTickerTracked {
+                        Text("·")
+                        Text(account.tickerSymbol.uppercased())
+                            .fontWeight(.medium)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Spacer()

@@ -13,7 +13,17 @@ struct AddEditAccountView: View {
     @State private var selectedType: AccountType = .checking
     @State private var balanceText: String = ""
     @State private var selectedCurrency: String = "USD"
+    @State private var tickerSymbol: String = ""
+    @State private var quantityText: String = ""
     @State private var showingDeleteConfirm = false
+
+    private var isTickerMode: Bool {
+        selectedType.supportsTicker && !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var parsedQuantity: Double? {
+        Double(quantityText.trimmingCharacters(in: .whitespaces))
+    }
 
     static let currencies: [(code: String, label: String)] = [
         ("USD", "USD — US Dollar"),
@@ -49,7 +59,9 @@ struct AddEditAccountView: View {
     }
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty && parsedBalance != nil
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if isTickerMode { return parsedQuantity != nil }
+        return parsedBalance != nil
     }
 
     var body: some View {
@@ -66,6 +78,38 @@ struct AddEditAccountView: View {
                         .autocorrectionDisabled()
                 }
 
+                if selectedType.supportsTicker {
+                    Section {
+                        HStack {
+                            TextField("Ticker symbol (e.g. VOO, AAPL)", text: $tickerSymbol)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.characters)
+                            if !tickerSymbol.isEmpty {
+                                Button { tickerSymbol = "" } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty {
+                            HStack {
+                                TextField("Number of shares", text: $quantityText)
+                                    .keyboardType(.decimalPad)
+                                Text("shares")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: {
+                        Text("Auto-Track Price")
+                    } footer: {
+                        Text(isTickerMode
+                             ? "Balance will be updated automatically using market price × shares."
+                             : "Optional. Enter a ticker to track price automatically.")
+                    }
+                }
+
                 Section(selectedType.isLiability ? "Amount Owed" : "Current Balance") {
                     Picker("Currency", selection: $selectedCurrency) {
                         ForEach(Self.currencies, id: \.code) { currency in
@@ -73,12 +117,24 @@ struct AddEditAccountView: View {
                         }
                     }
 
-                    HStack {
-                        Text(currencySymbol(for: selectedCurrency))
-                            .foregroundStyle(.secondary)
-                        TextField("0", text: $balanceText)
-                            .keyboardType(.decimalPad)
+                    if isTickerMode {
+                        HStack {
+                            Image(systemName: "lock.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Calculated from market price × shares")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack {
+                            Text(currencySymbol(for: selectedCurrency))
+                                .foregroundStyle(.secondary)
+                            TextField("0", text: $balanceText)
+                                .keyboardType(.decimalPad)
+                        }
                     }
+
                     if selectedType.isLiability {
                         Text("Enter the amount you owe as a positive number.")
                             .font(.caption)
@@ -192,39 +248,55 @@ struct AddEditAccountView: View {
         institution = account.institution
         selectedType = account.type
         selectedCurrency = account.currency
-        balanceText = String(format: "%.2f", account.currentBalance)
+        tickerSymbol = account.tickerSymbol
+        if account.quantity > 0 {
+            quantityText = String(format: "%g", account.quantity)
+        }
+        if !account.isTickerTracked {
+            balanceText = String(format: "%.2f", account.currentBalance)
+        }
     }
 
     private func save() {
-        guard let balance = parsedBalance else { return }
+        let balance = parsedBalance ?? 0
+        let ticker = tickerSymbol.trimmingCharacters(in: .whitespaces).uppercased()
+        let qty = parsedQuantity ?? 0
 
         if let account = editingAccount {
             account.name = name
             account.institution = institution
             account.type = selectedType
-            account.currentBalance = balance
             account.currency = selectedCurrency
+            account.tickerSymbol = ticker
+            account.quantity = qty
+            if !isTickerMode {
+                account.currentBalance = balance
+                let snap = BalanceSnapshot(balance: balance)
+                modelContext.insert(snap)
+                account.balanceHistory.append(snap)
+            }
             account.updatedAt = Date()
-
-            let snap = BalanceSnapshot(balance: balance)
-            modelContext.insert(snap)
-            account.balanceHistory.append(snap)
         } else {
             let account = Account(
                 name: name.trimmingCharacters(in: .whitespaces),
                 type: selectedType,
-                balance: balance,
+                balance: isTickerMode ? 0 : balance,
                 institution: institution.trimmingCharacters(in: .whitespaces),
                 currency: selectedCurrency
             )
+            account.tickerSymbol = ticker
+            account.quantity = qty
             modelContext.insert(account)
 
-            let snap = BalanceSnapshot(balance: balance)
-            modelContext.insert(snap)
-            account.balanceHistory.append(snap)
+            if !isTickerMode {
+                let snap = BalanceSnapshot(balance: balance)
+                modelContext.insert(snap)
+                account.balanceHistory.append(snap)
+            }
         }
 
         recordNetWorthSnapshot()
+        try? modelContext.save()
         dismiss()
     }
 
@@ -232,6 +304,7 @@ struct AddEditAccountView: View {
         guard let account = editingAccount else { return }
         modelContext.delete(account)
         recordNetWorthSnapshot()
+        try? modelContext.save()
         dismiss()
     }
 

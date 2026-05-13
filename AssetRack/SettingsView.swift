@@ -8,13 +8,13 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Reporting Currency", selection: $fx.baseCurrency) {
+                    Picker("Currency", selection: $fx.baseCurrency) {
                         ForEach(AddEditAccountView.currencies, id: \.code) { currency in
                             Text(currency.label).tag(currency.code)
                         }
                     }
                 } header: {
-                    Text("Reporting Currency")
+                    Text("Currency")
                 } footer: {
                     Text("All account balances are converted to this currency when calculating your net worth.")
                 }
