@@ -15,6 +15,7 @@ struct AddEditAccountView: View {
     @State private var selectedCurrency: String = "USD"
     @State private var tickerSymbol: String = ""
     @State private var quantityText: String = ""
+    @State private var balanceDate: Date = Date()
     @State private var showingDeleteConfirm = false
 
     private var isTickerMode: Bool {
@@ -132,6 +133,15 @@ struct AddEditAccountView: View {
                                 .foregroundStyle(.secondary)
                             TextField("0", text: $balanceText)
                                 .keyboardType(.decimalPad)
+                        }
+
+                        if isEditing {
+                            DatePicker(
+                                "As of",
+                                selection: $balanceDate,
+                                in: ...Date(),
+                                displayedComponents: [.date]
+                            )
                         }
                     }
 
@@ -271,11 +281,11 @@ struct AddEditAccountView: View {
             account.quantity = qty
             if !isTickerMode {
                 account.currentBalance = balance
-                let snap = BalanceSnapshot(balance: balance)
+                let snap = BalanceSnapshot(balance: balance, recordedAt: balanceDate)
                 modelContext.insert(snap)
                 account.balanceHistory.append(snap)
             }
-            account.updatedAt = Date()
+            account.updatedAt = balanceDate
         } else {
             let account = Account(
                 name: name.trimmingCharacters(in: .whitespaces),
@@ -295,7 +305,7 @@ struct AddEditAccountView: View {
             }
         }
 
-        recordNetWorthSnapshot()
+        recordNetWorthSnapshot(at: isEditing ? balanceDate : Date())
         try? modelContext.save()
         dismiss()
     }
@@ -303,12 +313,12 @@ struct AddEditAccountView: View {
     private func deleteAndDismiss() {
         guard let account = editingAccount else { return }
         modelContext.delete(account)
-        recordNetWorthSnapshot()
+        recordNetWorthSnapshot(at: Date())
         try? modelContext.save()
         dismiss()
     }
 
-    private func recordNetWorthSnapshot() {
+    private func recordNetWorthSnapshot(at date: Date = Date()) {
         // Inline snapshot — SnapshotService (Step 4) will centralise this
         let allAccounts = (try? modelContext.fetch(FetchDescriptor<Account>())) ?? []
         let assets = allAccounts.filter { !$0.isLiability }.reduce(0) { $0 + $1.currentBalance }
@@ -316,7 +326,8 @@ struct AddEditAccountView: View {
         let snap = NetWorthSnapshot(
             netWorth: assets - liabilities,
             totalAssets: assets,
-            totalLiabilities: liabilities
+            totalLiabilities: liabilities,
+            recordedAt: date
         )
         modelContext.insert(snap)
     }
