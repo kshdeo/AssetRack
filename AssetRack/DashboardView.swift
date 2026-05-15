@@ -47,6 +47,9 @@ struct DashboardView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
+            .navigationDestination(isPresented: $showingAllAccounts) {
+                AccountsListView(fx: fx, ticker: ticker)
+            }
             .task {
                 await fx.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext)
