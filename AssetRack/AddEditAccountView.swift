@@ -13,7 +13,7 @@ struct AddEditAccountView: View {
     @State private var institution: String = ""
     @State private var selectedType: AccountType = .checking
     @State private var balanceText: String = ""
-    @State private var selectedCurrency: String = "USD"
+    @State private var selectedCurrency: Currency = .usd
     @State private var balanceDate: Date = Date()
     @State private var cashBalanceText: String = ""
     @State private var holdings: [HoldingDraft] = []
@@ -28,29 +28,6 @@ struct AddEditAccountView: View {
         // Holds reference to persisted Holding when editing existing account
         var existingHolding: Holding?
     }
-
-    static let currencies: [(code: String, label: String)] = [
-        ("USD", "USD — US Dollar"),
-        ("EUR", "EUR — Euro"),
-        ("GBP", "GBP — British Pound"),
-        ("CAD", "CAD — Canadian Dollar"),
-        ("AUD", "AUD — Australian Dollar"),
-        ("CHF", "CHF — Swiss Franc"),
-        ("JPY", "JPY — Japanese Yen"),
-        ("CNY", "CNY — Chinese Yuan"),
-        ("INR", "INR — Indian Rupee"),
-        ("SGD", "SGD — Singapore Dollar"),
-        ("HKD", "HKD — Hong Kong Dollar"),
-        ("NZD", "NZD — New Zealand Dollar"),
-        ("MXN", "MXN — Mexican Peso"),
-        ("BRL", "BRL — Brazilian Real"),
-        ("KRW", "KRW — South Korean Won"),
-        ("SEK", "SEK — Swedish Krona"),
-        ("NOK", "NOK — Norwegian Krone"),
-        ("DKK", "DKK — Danish Krone"),
-        ("AED", "AED — UAE Dirham"),
-        ("ZAR", "ZAR — South African Rand"),
-    ]
 
     private var isEditing: Bool { editingAccount != nil }
 
@@ -173,13 +150,13 @@ struct AddEditAccountView: View {
 
             Section {
                 Picker("Currency", selection: $selectedCurrency) {
-                    ForEach(Self.currencies, id: \.code) { c in
-                        Text(c.label).tag(c.code)
+                    ForEach(Currency.allCases, id: \.self) { c in
+                        Text(c.label).tag(c)
                     }
                 }
 
                 HStack {
-                    Text(currencySymbol(for: selectedCurrency))
+                    Text(selectedCurrency.symbol)
                         .foregroundStyle(.secondary)
                     TextField("0", text: $cashBalanceText)
                         .keyboardType(.decimalPad)
@@ -197,13 +174,13 @@ struct AddEditAccountView: View {
     private var balanceSection: some View {
         Section(selectedType.isLiability ? "Amount Owed" : "Current Balance") {
             Picker("Currency", selection: $selectedCurrency) {
-                ForEach(Self.currencies, id: \.code) { c in
-                    Text(c.label).tag(c.code)
+                ForEach(Currency.allCases, id: \.self) { c in
+                    Text(c.label).tag(c)
                 }
             }
 
             HStack {
-                Text(currencySymbol(for: selectedCurrency))
+                Text(selectedCurrency.symbol)
                     .foregroundStyle(.secondary)
                 TextField("0", text: $balanceText)
                     .keyboardType(.decimalPad)
@@ -285,19 +262,13 @@ struct AddEditAccountView: View {
 
     // MARK: - Helpers
 
-    private func currencySymbol(for code: String) -> String {
-        let locale = Locale.availableIdentifiers
-            .map { Locale(identifier: $0) }
-            .first { $0.currency?.identifier == code }
-        return locale?.currencySymbol ?? code
-    }
 
     private func prefill() {
         guard let account = editingAccount else { return }
         name = account.name
         institution = account.institution
         selectedType = account.type
-        selectedCurrency = account.currency
+        selectedCurrency = Currency(rawValue: account.currency) ?? .usd
 
         if account.type.supportsHoldings {
             cashBalanceText = account.cashBalance > 0 ? String(format: "%.2f", account.cashBalance) : ""
@@ -316,7 +287,7 @@ struct AddEditAccountView: View {
             account.name = name
             account.institution = institution
             account.type = selectedType
-            account.currency = selectedCurrency
+            account.currency = selectedCurrency.code
 
             if selectedType.supportsHoldings {
                 syncHoldings(to: account)
@@ -336,7 +307,7 @@ struct AddEditAccountView: View {
                 type: selectedType,
                 balance: selectedType.supportsHoldings ? 0 : (parsedBalance ?? 0),
                 institution: institution.trimmingCharacters(in: .whitespaces),
-                currency: selectedCurrency
+                currency: selectedCurrency.code
             )
             modelContext.insert(account)
 

@@ -9,8 +9,8 @@ struct SettingsView: View {
             Form {
                 Section {
                     Picker("Currency", selection: $fx.baseCurrency) {
-                        ForEach(AddEditAccountView.currencies, id: \.code) { currency in
-                            Text(currency.label).tag(currency.code)
+                        ForEach(Currency.allCases, id: \.self) { currency in
+                            Text(currency.label).tag(currency.rawValue)
                         }
                     }
                 } header: {
