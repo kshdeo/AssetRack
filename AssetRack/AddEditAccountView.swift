@@ -166,6 +166,22 @@ struct AddEditAccountView: View {
             } footer: {
                 Text("Cash held in this brokerage account, separate from your holdings.")
             }
+
+            if !holdings.isEmpty || parsedCashBalance > 0 {
+                Section {
+                    let holdingsTotal = holdings.reduce(0.0) { $0 + ($1.existingHolding?.value ?? 0) }
+                    let cash = parsedCashBalance
+                    let total = holdingsTotal + cash
+                    LabeledContent("Total") {
+                        Text(total.currencyFormatted(code: selectedCurrency.code))
+                            .fontWeight(.semibold)
+                    }
+                } footer: {
+                    if holdings.contains(where: { $0.existingHolding?.lastPrice == 0 || $0.existingHolding == nil }) {
+                        Text("Holdings without a fetched price are excluded from the total.")
+                    }
+                }
+            }
         }
     }
 
