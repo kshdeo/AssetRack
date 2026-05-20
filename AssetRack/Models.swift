@@ -26,21 +26,16 @@ enum AccountType: String, CaseIterable, Codable {
 
     var category: AccountCategory {
         switch self {
-        case .checking, .savings:   return .cashAndBank
-        case .brokerage:            return .investments
-        case .realEstate:           return .realEstate
-        case .mortgage, .creditCard, .loan: return .liabilities
+        case .checking, .savings:               return .cashAndBank
+        case .brokerage:                        return .investments
+        case .realEstate:                       return .realEstate
+        case .mortgage, .creditCard, .loan:     return .liabilities
         }
     }
 
     var isLiability: Bool { category == .liabilities }
 
-    var supportsTicker: Bool {
-        switch self {
-        case .brokerage: return true
-        default: return false
-        }
-    }
+    var supportsHoldings: Bool { self == .brokerage }
 
     var systemImage: String {
         switch self {
@@ -62,7 +57,28 @@ enum AccountCategory: String, CaseIterable {
     case liabilities   = "Liabilities"
 }
 
-// MARK: - Models
+// MARK: - Holding
+
+@Model
+final class Holding {
+    var id: UUID = UUID()
+    var tickerSymbol: String = ""
+    var name: String = ""
+    var quantity: Double = 0.0
+    var lastPrice: Double = 0.0
+
+    var value: Double { lastPrice * quantity }
+
+    init(tickerSymbol: String, quantity: Double) {
+        self.id = UUID()
+        self.tickerSymbol = tickerSymbol.uppercased().trimmingCharacters(in: .whitespaces)
+        self.quantity = quantity
+        self.lastPrice = 0.0
+        self.name = ""
+    }
+}
+
+// MARK: - Account
 
 @Model
 final class Account: Identifiable {
@@ -70,16 +86,14 @@ final class Account: Identifiable {
     var name: String = ""
     var typeRaw: String = AccountType.checking.rawValue
     var currentBalance: Double = 0.0
+    var cashBalance: Double = 0.0
     var currency: String = "USD"
     var institution: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
-    var tickerSymbol: String = ""
-    var quantity: Double = 0.0
-    var lastPrice: Double = 0.0
-
-    var isTickerTracked: Bool { !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty && quantity > 0 }
+    @Relationship(deleteRule: .cascade)
+    var holdings: [Holding] = []
 
     @Relationship(deleteRule: .cascade)
     var balanceHistory: [BalanceSnapshot] = []
@@ -90,8 +104,16 @@ final class Account: Identifiable {
     }
 
     var isLiability: Bool { type.isLiability }
+    var hasHoldings: Bool { !holdings.isEmpty }
 
     var signedBalance: Double { isLiability ? -currentBalance : currentBalance }
+
+    /// For brokerage accounts, balance = sum of holdings + cash.
+    /// For all others, balance is manually entered.
+    func recomputeBalance() {
+        guard type.supportsHoldings else { return }
+        currentBalance = holdings.reduce(0) { $0 + $1.value } + cashBalance
+    }
 
     init(name: String, type: AccountType, balance: Double, institution: String = "", currency: String = "USD") {
         self.id = UUID()
@@ -104,6 +126,8 @@ final class Account: Identifiable {
         self.updatedAt = Date()
     }
 }
+
+// MARK: - Snapshots
 
 @Model
 final class BalanceSnapshot {

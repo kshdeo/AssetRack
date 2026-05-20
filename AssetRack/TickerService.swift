@@ -6,9 +6,10 @@ import SwiftData
 final class TickerService {
     private(set) var isLoading = false
     private(set) var lastFetched: Date?
-    private(set) var errors: [String: String] = [:]  // symbol → error message
+    private(set) var errors: [String: String] = [:]
 
     private let fetchedAtKey = "ticker_last_fetched"
+    private var crumb: String?
 
     init() {
         lastFetched = UserDefaults.standard.object(forKey: fetchedAtKey) as? Date
@@ -20,36 +21,43 @@ final class TickerService {
     }
 
     func fetch(context: ModelContext) async {
-        let allAccounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
-        let tracked = allAccounts.filter { $0.isTickerTracked }
-        guard !tracked.isEmpty else { return }
+        let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
+        let allHoldings = accounts.flatMap { $0.holdings }
+        guard !allHoldings.isEmpty else { return }
 
         isLoading = true
         errors = [:]
 
-        let symbols = tracked.map { $0.tickerSymbol.uppercased() }
+        // Deduplicate symbols
+        let symbols = Array(Set(allHoldings.map { $0.tickerSymbol }))
         let joined = symbols.joined(separator: ",")
 
         do {
             let prices = try await fetchPrices(symbols: joined)
 
-            for account in tracked {
-                let symbol = account.tickerSymbol.uppercased()
-                if let price = prices[symbol] {
-                    account.lastPrice = price
-                    account.currentBalance = price * account.quantity
-                    account.updatedAt = Date()
+            for account in accounts where account.type.supportsHoldings {
+                for holding in account.holdings {
+                    if let price = prices[holding.tickerSymbol] {
+                        holding.lastPrice = price
+                    } else {
+                        errors[holding.tickerSymbol] = "Price unavailable"
+                    }
+                }
+                let oldBalance = account.currentBalance
+                account.recomputeBalance()
 
+                // Record a balance snapshot if balance changed meaningfully
+                if abs(account.currentBalance - oldBalance) > 0.01 {
                     let snap = BalanceSnapshot(balance: account.currentBalance)
                     context.insert(snap)
                     account.balanceHistory.append(snap)
-                } else {
-                    errors[symbol] = "Price unavailable"
+                    account.updatedAt = Date()
                 }
             }
 
             lastFetched = Date()
             UserDefaults.standard.set(lastFetched, forKey: fetchedAtKey)
+            try? context.save()
         } catch {
             for symbol in symbols {
                 errors[symbol] = "Could not fetch price"
@@ -66,16 +74,12 @@ final class TickerService {
         return Date().timeIntervalSince(last) > 3_600
     }
 
-    private var crumb: String?
-
     private func fetchCrumb() async throws -> String {
-        // Step 1: hit fc.yahoo.com to plant the required cookie
         let cookieURL = URL(string: "https://fc.yahoo.com")!
         var req = URLRequest(url: cookieURL)
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
         _ = try? await URLSession.shared.data(for: req)
 
-        // Step 2: exchange the cookie for a crumb
         let crumbURL = URL(string: "https://query2.finance.yahoo.com/v1/test/getcrumb")!
         var crumbReq = URLRequest(url: crumbURL)
         crumbReq.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -88,9 +92,7 @@ final class TickerService {
     }
 
     private func fetchPrices(symbols: String) async throws -> [String: Double] {
-        if crumb == nil {
-            crumb = try await fetchCrumb()
-        }
+        if crumb == nil { crumb = try await fetchCrumb() }
 
         var components = URLComponents(string: "https://query1.finance.yahoo.com/v7/finance/quote")!
         components.queryItems = [
@@ -104,19 +106,16 @@ final class TickerService {
         let (data, response) = try await URLSession.shared.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
-        // Crumb expired — clear it and retry once
         if statusCode == 401 {
             crumb = try await fetchCrumb()
             components.queryItems = [
                 URLQueryItem(name: "symbols", value: symbols),
                 URLQueryItem(name: "crumb", value: crumb)
             ]
-            var retryRequest = URLRequest(url: components.url!)
-            retryRequest.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-            let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
-            guard (retryResponse as? HTTPURLResponse)?.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
+            var retry = URLRequest(url: components.url!)
+            retry.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+            let (retryData, retryResponse) = try await URLSession.shared.data(for: retry)
+            guard (retryResponse as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             return try parseQuotes(from: retryData)
         }
 

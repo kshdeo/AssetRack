@@ -386,10 +386,9 @@ struct AccountRow: View {
                     .font(.subheadline.weight(.medium))
                 HStack(spacing: 4) {
                     Text(account.type.displayName)
-                    if account.isTickerTracked {
+                    if account.hasHoldings {
                         Text("·")
-                        Text(account.tickerSymbol.uppercased())
-                            .fontWeight(.medium)
+                        Text("^[\(account.holdings.count) holding](inflect: true)")
                     }
                 }
                 .font(.caption)

@@ -1,10 +1,11 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Add / Edit Account
+
 struct AddEditAccountView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query private var accounts: [Account]
 
     var editingAccount: Account?
 
@@ -13,17 +14,19 @@ struct AddEditAccountView: View {
     @State private var selectedType: AccountType = .checking
     @State private var balanceText: String = ""
     @State private var selectedCurrency: String = "USD"
-    @State private var tickerSymbol: String = ""
-    @State private var quantityText: String = ""
     @State private var balanceDate: Date = Date()
+    @State private var cashBalanceText: String = ""
+    @State private var holdings: [HoldingDraft] = []
+    @State private var showingAddHolding = false
+    @State private var holdingToEdit: HoldingDraft?
     @State private var showingDeleteConfirm = false
 
-    private var isTickerMode: Bool {
-        selectedType.supportsTicker && !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
-    private var parsedQuantity: Double? {
-        Double(quantityText.trimmingCharacters(in: .whitespaces))
+    struct HoldingDraft: Identifiable {
+        var id = UUID()
+        var tickerSymbol: String
+        var quantity: Double
+        // Holds reference to persisted Holding when editing existing account
+        var existingHolding: Holding?
     }
 
     static let currencies: [(code: String, label: String)] = [
@@ -59,9 +62,17 @@ struct AddEditAccountView: View {
         return Double(cleaned)
     }
 
+    private var parsedCashBalance: Double {
+        let cleaned = cashBalanceText
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: "$", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Double(cleaned) ?? 0
+    }
+
     private var canSave: Bool {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
-        if isTickerMode { return parsedQuantity != nil }
+        if selectedType.supportsHoldings { return true }
         return parsedBalance != nil
     }
 
@@ -79,77 +90,10 @@ struct AddEditAccountView: View {
                         .autocorrectionDisabled()
                 }
 
-                if selectedType.supportsTicker {
-                    Section {
-                        HStack {
-                            TextField("Ticker symbol (e.g. VOO, AAPL)", text: $tickerSymbol)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.characters)
-                            if !tickerSymbol.isEmpty {
-                                Button { tickerSymbol = "" } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
-                        if !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty {
-                            HStack {
-                                TextField("Number of shares", text: $quantityText)
-                                    .keyboardType(.decimalPad)
-                                Text("shares")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } header: {
-                        Text("Auto-Track Price")
-                    } footer: {
-                        Text(isTickerMode
-                             ? "Balance will be updated automatically using market price × shares."
-                             : "Optional. Enter a ticker to track price automatically.")
-                    }
-                }
-
-                Section(selectedType.isLiability ? "Amount Owed" : "Current Balance") {
-                    Picker("Currency", selection: $selectedCurrency) {
-                        ForEach(Self.currencies, id: \.code) { currency in
-                            Text(currency.label).tag(currency.code)
-                        }
-                    }
-
-                    if isTickerMode {
-                        HStack {
-                            Image(systemName: "lock.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Calculated from market price × shares")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        HStack {
-                            Text(currencySymbol(for: selectedCurrency))
-                                .foregroundStyle(.secondary)
-                            TextField("0", text: $balanceText)
-                                .keyboardType(.decimalPad)
-                        }
-
-                        if isEditing {
-                            DatePicker(
-                                "As of",
-                                selection: $balanceDate,
-                                in: ...Date(),
-                                displayedComponents: [.date]
-                            )
-                        }
-                    }
-
-                    if selectedType.isLiability {
-                        Text("Enter the amount you owe as a positive number.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if selectedType.supportsHoldings {
+                    holdingsSection
+                } else {
+                    balanceSection
                 }
 
                 if isEditing {
@@ -182,8 +126,104 @@ struct AddEditAccountView: View {
             } message: {
                 Text("This will permanently remove the account and its history.")
             }
+            .sheet(isPresented: $showingAddHolding) {
+                AddHoldingView { draft in
+                    holdings.append(draft)
+                }
+            }
+            .sheet(item: $holdingToEdit) { draft in
+                AddHoldingView(existing: draft) { updated in
+                    if let idx = holdings.firstIndex(where: { $0.id == updated.id }) {
+                        holdings[idx] = updated
+                    }
+                }
+            }
         }
         .onAppear { prefill() }
+    }
+
+    // MARK: - Holdings Section
+
+    private var holdingsSection: some View {
+        Group {
+            Section {
+                if holdings.isEmpty {
+                    Text("No holdings yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(holdings) { draft in
+                        Button { holdingToEdit = draft } label: {
+                            HoldingDraftRow(draft: draft)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .onDelete { indices in
+                        holdings.remove(atOffsets: indices)
+                    }
+                }
+
+                Button {
+                    showingAddHolding = true
+                } label: {
+                    Label("Add Holding", systemImage: "plus.circle.fill")
+                }
+            } header: {
+                Text("Holdings")
+            }
+
+            Section {
+                Picker("Currency", selection: $selectedCurrency) {
+                    ForEach(Self.currencies, id: \.code) { c in
+                        Text(c.label).tag(c.code)
+                    }
+                }
+
+                HStack {
+                    Text(currencySymbol(for: selectedCurrency))
+                        .foregroundStyle(.secondary)
+                    TextField("0", text: $cashBalanceText)
+                        .keyboardType(.decimalPad)
+                }
+            } header: {
+                Text("Cash Balance")
+            } footer: {
+                Text("Cash held in this brokerage account, separate from your holdings.")
+            }
+        }
+    }
+
+    // MARK: - Balance Section (non-brokerage)
+
+    private var balanceSection: some View {
+        Section(selectedType.isLiability ? "Amount Owed" : "Current Balance") {
+            Picker("Currency", selection: $selectedCurrency) {
+                ForEach(Self.currencies, id: \.code) { c in
+                    Text(c.label).tag(c.code)
+                }
+            }
+
+            HStack {
+                Text(currencySymbol(for: selectedCurrency))
+                    .foregroundStyle(.secondary)
+                TextField("0", text: $balanceText)
+                    .keyboardType(.decimalPad)
+            }
+
+            if isEditing {
+                DatePicker(
+                    "As of",
+                    selection: $balanceDate,
+                    in: ...Date(),
+                    displayedComponents: [.date]
+                )
+            }
+
+            if selectedType.isLiability {
+                Text("Enter the amount you owe as a positive number.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: - Type Picker
@@ -243,7 +283,7 @@ struct AddEditAccountView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Helpers
 
     private func currencySymbol(for code: String) -> String {
         let locale = Locale.availableIdentifiers
@@ -258,56 +298,87 @@ struct AddEditAccountView: View {
         institution = account.institution
         selectedType = account.type
         selectedCurrency = account.currency
-        tickerSymbol = account.tickerSymbol
-        if account.quantity > 0 {
-            quantityText = String(format: "%g", account.quantity)
-        }
-        if !account.isTickerTracked {
+
+        if account.type.supportsHoldings {
+            cashBalanceText = account.cashBalance > 0 ? String(format: "%.2f", account.cashBalance) : ""
+            holdings = account.holdings.map {
+                HoldingDraft(tickerSymbol: $0.tickerSymbol, quantity: $0.quantity, existingHolding: $0)
+            }
+        } else {
             balanceText = String(format: "%.2f", account.currentBalance)
         }
     }
 
-    private func save() {
-        let balance = parsedBalance ?? 0
-        let ticker = tickerSymbol.trimmingCharacters(in: .whitespaces).uppercased()
-        let qty = parsedQuantity ?? 0
+    // MARK: - Save / Delete
 
+    private func save() {
         if let account = editingAccount {
             account.name = name
             account.institution = institution
             account.type = selectedType
             account.currency = selectedCurrency
-            account.tickerSymbol = ticker
-            account.quantity = qty
-            if !isTickerMode {
+
+            if selectedType.supportsHoldings {
+                syncHoldings(to: account)
+                account.cashBalance = parsedCashBalance
+                account.recomputeBalance()
+            } else {
+                let balance = parsedBalance ?? 0
                 account.currentBalance = balance
+                account.updatedAt = balanceDate
                 let snap = BalanceSnapshot(balance: balance, recordedAt: balanceDate)
                 modelContext.insert(snap)
                 account.balanceHistory.append(snap)
             }
-            account.updatedAt = balanceDate
         } else {
             let account = Account(
                 name: name.trimmingCharacters(in: .whitespaces),
                 type: selectedType,
-                balance: isTickerMode ? 0 : balance,
+                balance: selectedType.supportsHoldings ? 0 : (parsedBalance ?? 0),
                 institution: institution.trimmingCharacters(in: .whitespaces),
                 currency: selectedCurrency
             )
-            account.tickerSymbol = ticker
-            account.quantity = qty
             modelContext.insert(account)
 
-            if !isTickerMode {
+            if selectedType.supportsHoldings {
+                for draft in holdings {
+                    let h = Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity)
+                    modelContext.insert(h)
+                    account.holdings.append(h)
+                }
+                account.cashBalance = parsedCashBalance
+                account.recomputeBalance()
+            } else {
+                let balance = parsedBalance ?? 0
                 let snap = BalanceSnapshot(balance: balance)
                 modelContext.insert(snap)
                 account.balanceHistory.append(snap)
             }
         }
 
-        recordNetWorthSnapshot(at: isEditing ? balanceDate : Date())
+        recordNetWorthSnapshot(at: selectedType.supportsHoldings ? Date() : balanceDate)
         try? modelContext.save()
         dismiss()
+    }
+
+    private func syncHoldings(to account: Account) {
+        // Delete removed holdings
+        let draftIds = Set(holdings.compactMap { $0.existingHolding?.id })
+        for existing in account.holdings where !draftIds.contains(existing.id) {
+            modelContext.delete(existing)
+        }
+
+        // Update or insert
+        for draft in holdings {
+            if let existing = draft.existingHolding {
+                existing.tickerSymbol = draft.tickerSymbol
+                existing.quantity = draft.quantity
+            } else {
+                let h = Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity)
+                modelContext.insert(h)
+                account.holdings.append(h)
+            }
+        }
     }
 
     private func deleteAndDismiss() {
@@ -318,8 +389,7 @@ struct AddEditAccountView: View {
         dismiss()
     }
 
-    private func recordNetWorthSnapshot(at date: Date = Date()) {
-        // Inline snapshot — SnapshotService (Step 4) will centralise this
+    private func recordNetWorthSnapshot(at date: Date) {
         let allAccounts = (try? modelContext.fetch(FetchDescriptor<Account>())) ?? []
         let assets = allAccounts.filter { !$0.isLiability }.reduce(0) { $0 + $1.currentBalance }
         let liabilities = allAccounts.filter { $0.isLiability }.reduce(0) { $0 + $1.currentBalance }
@@ -333,14 +403,111 @@ struct AddEditAccountView: View {
     }
 }
 
+// MARK: - Holding Draft Row
+
+struct HoldingDraftRow: View {
+    let draft: AddEditAccountView.HoldingDraft
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(draft.tickerSymbol.uppercased())
+                    .font(.subheadline.weight(.semibold))
+                Text("\(draft.quantity.formatted()) shares")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let existing = draft.existingHolding, existing.lastPrice > 0 {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(existing.value.currencyFormatted())
+                        .font(.subheadline.weight(.medium))
+                    Text("@ \(existing.lastPrice.currencyFormatted()) ea")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Add Holding Sheet
+
+struct AddHoldingView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var existing: AddEditAccountView.HoldingDraft?
+    var onSave: (AddEditAccountView.HoldingDraft) -> Void
+
+    @State private var tickerSymbol: String = ""
+    @State private var quantityText: String = ""
+
+    private var parsedQuantity: Double? { Double(quantityText) }
+    private var canSave: Bool {
+        !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty && parsedQuantity != nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Ticker symbol (e.g. VOO, AAPL, BTC-USD)", text: $tickerSymbol)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.characters)
+
+                    HStack {
+                        TextField("Number of shares", text: $quantityText)
+                            .keyboardType(.decimalPad)
+                        Text("shares")
+                            .foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
+                }
+            }
+            .navigationTitle(existing == nil ? "Add Holding" : "Edit Holding")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { saveHolding() }
+                        .disabled(!canSave)
+                }
+            }
+        }
+        .onAppear {
+            if let existing {
+                tickerSymbol = existing.tickerSymbol
+                quantityText = existing.quantity.formatted()
+            }
+        }
+    }
+
+    private func saveHolding() {
+        guard let qty = parsedQuantity else { return }
+        let draft = AddEditAccountView.HoldingDraft(
+            id: existing?.id ?? UUID(),
+            tickerSymbol: tickerSymbol.uppercased().trimmingCharacters(in: .whitespaces),
+            quantity: qty,
+            existingHolding: existing?.existingHolding
+        )
+        onSave(draft)
+        dismiss()
+    }
+}
+
+// MARK: - Previews
+
 #Preview("Add") {
     AddEditAccountView()
         .modelContainer(ModelContainer.previewContainer)
 }
 
-#Preview("Edit") {
+#Preview("Edit Brokerage") {
     let container = ModelContainer.previewContainer
-    let account = Account(name: "Chase Checking", type: .checking, balance: 12_450, institution: "Chase")
+    let account = Account(name: "Fidelity Brokerage", type: .brokerage, balance: 0, institution: "Fidelity")
     return AddEditAccountView(editingAccount: account)
         .modelContainer(container)
 }
