@@ -8,6 +8,7 @@ struct AddEditAccountView: View {
     @Environment(\.dismiss) private var dismiss
 
     var editingAccount: Account?
+    var tickerService: TickerService?
 
     @State private var name: String = ""
     @State private var institution: String = ""
@@ -116,7 +117,12 @@ struct AddEditAccountView: View {
                 }
             }
         }
-        .onAppear { prefill() }
+        .onAppear {
+            prefill()
+            if editingAccount?.type.supportsHoldings == true, let ts = tickerService {
+                Task { await ts.fetch(context: modelContext) }
+            }
+        }
     }
 
     // MARK: - Holdings Section
@@ -145,7 +151,28 @@ struct AddEditAccountView: View {
                     Label("Add Holding", systemImage: "plus.circle.fill")
                 }
             } header: {
-                Text("Holdings")
+                HStack {
+                    Text("Holdings")
+                    Spacer()
+                    if let ts = tickerService {
+                        if ts.isLoading {
+                            ProgressView().scaleEffect(0.7)
+                        } else {
+                            Button {
+                                Task { await ts.fetch(context: modelContext) }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                if let ts = tickerService, let errSymbol = ts.errors.keys.first {
+                    Label("Could not fetch price for \(errSymbol)", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section {
@@ -396,25 +423,59 @@ struct HoldingDraftRow: View {
     let draft: AddEditAccountView.HoldingDraft
 
     var body: some View {
-        HStack {
+        HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(draft.tickerSymbol.uppercased())
                     .font(.subheadline.weight(.semibold))
-                Text("\(draft.quantity.formatted()) shares")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let existing = draft.existingHolding, existing.lastPrice > 0 {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(existing.value.currencyFormatted())
-                        .font(.subheadline.weight(.medium))
-                    Text("@ \(existing.lastPrice.currencyFormatted()) ea")
+                if let existing = draft.existingHolding, existing.lastPrice > 0 {
+                    Text("\(draft.quantity.formatted()) @ \(existing.lastPrice.currencyFormatted())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                } else {
+                    Text("\(draft.quantity.formatted()) shares")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
+            Spacer()
+            if let existing = draft.existingHolding {
+                HoldingPriceView(holding: existing)
+            } else {
+                Text("Price pending")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+}
+
+// Separate view so @Model observation triggers re-renders automatically
+struct HoldingPriceView: View {
+    var holding: Holding
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            if holding.lastPrice > 0 {
+                Text(holding.value.currencyFormatted())
+                    .font(.subheadline.weight(.semibold))
+                    .contentTransition(.numericText())
+                if let fetchedAt = holding.lastPriceFetchedAt {
+                    Text("Updated \(fetchedAt.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Not yet updated")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Price pending")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: holding.lastPrice)
     }
 }
 

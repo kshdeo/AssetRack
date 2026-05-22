@@ -16,37 +16,47 @@ final class TickerService {
     }
 
     func fetchIfNeeded(context: ModelContext) async {
-        guard shouldFetch else { return }
+        guard shouldFetch else {
+            print("[TickerService] Skipping fetch — last fetched \(lastFetched?.formatted() ?? "never"), threshold not reached")
+            return
+        }
         await fetch(context: context)
     }
 
     func fetch(context: ModelContext) async {
         let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
         let allHoldings = accounts.flatMap { $0.holdings }
-        guard !allHoldings.isEmpty else { return }
+        guard !allHoldings.isEmpty else {
+            print("[TickerService] No holdings found — skipping fetch")
+            return
+        }
 
         isLoading = true
         errors = [:]
 
-        // Deduplicate symbols
         let symbols = Array(Set(allHoldings.map { $0.tickerSymbol }))
         let joined = symbols.joined(separator: ",")
+        print("[TickerService] Fetching prices for: \(joined)")
 
         do {
             let prices = try await fetchPrices(symbols: joined)
+            print("[TickerService] Got \(prices.count) prices: \(prices)")
 
+            let fetchedAt = Date()
             for account in accounts where account.type.supportsHoldings {
                 for holding in account.holdings {
                     if let price = prices[holding.tickerSymbol] {
+                        print("[TickerService] \(holding.tickerSymbol): \(price)")
                         holding.lastPrice = price
+                        holding.lastPriceFetchedAt = fetchedAt
                     } else {
+                        print("[TickerService] \(holding.tickerSymbol): no price in response")
                         errors[holding.tickerSymbol] = "Price unavailable"
                     }
                 }
                 let oldBalance = account.currentBalance
                 account.recomputeBalance()
 
-                // Record a balance snapshot if balance changed meaningfully
                 if abs(account.currentBalance - oldBalance) > 0.01 {
                     let snap = BalanceSnapshot(balance: account.currentBalance)
                     context.insert(snap)
@@ -58,7 +68,9 @@ final class TickerService {
             lastFetched = Date()
             UserDefaults.standard.set(lastFetched, forKey: fetchedAtKey)
             try? context.save()
+            print("[TickerService] Fetch complete, context saved")
         } catch {
+            print("[TickerService] Fetch failed: \(error)")
             for symbol in symbols {
                 errors[symbol] = "Could not fetch price"
             }
@@ -75,24 +87,30 @@ final class TickerService {
     }
 
     private func fetchCrumb() async throws -> String {
+        print("[TickerService] Fetching crumb...")
         let cookieURL = URL(string: "https://fc.yahoo.com")!
         var req = URLRequest(url: cookieURL)
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-        _ = try? await URLSession.shared.data(for: req)
+        let (_, cookieResponse) = (try? await URLSession.shared.data(for: req)) ?? (Data(), nil)
+        print("[TickerService] Cookie response status: \((cookieResponse as? HTTPURLResponse)?.statusCode ?? -1)")
 
         let crumbURL = URL(string: "https://query2.finance.yahoo.com/v1/test/getcrumb")!
         var crumbReq = URLRequest(url: crumbURL)
         crumbReq.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: crumbReq)
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
-              let crumb = String(data: data, encoding: .utf8), !crumb.isEmpty else {
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let crumbString = String(data: data, encoding: .utf8) ?? ""
+        print("[TickerService] Crumb response status: \(status), crumb: '\(crumbString)'")
+
+        guard status == 200, !crumbString.isEmpty else {
             throw URLError(.userAuthenticationRequired)
         }
-        return crumb
+        return crumbString
     }
 
     private func fetchPrices(symbols: String) async throws -> [String: Double] {
         if crumb == nil { crumb = try await fetchCrumb() }
+        print("[TickerService] Using crumb: '\(crumb ?? "nil")'")
 
         var components = URLComponents(string: "https://query1.finance.yahoo.com/v7/finance/quote")!
         components.queryItems = [
@@ -105,8 +123,10 @@ final class TickerService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        print("[TickerService] Quote response status: \(statusCode)")
 
         if statusCode == 401 {
+            print("[TickerService] 401 — refreshing crumb and retrying")
             crumb = try await fetchCrumb()
             components.queryItems = [
                 URLQueryItem(name: "symbols", value: symbols),
@@ -115,21 +135,39 @@ final class TickerService {
             var retry = URLRequest(url: components.url!)
             retry.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
             let (retryData, retryResponse) = try await URLSession.shared.data(for: retry)
-            guard (retryResponse as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+            let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? 0
+            print("[TickerService] Retry response status: \(retryStatus)")
+            guard retryStatus == 200 else { throw URLError(.badServerResponse) }
             return try parseQuotes(from: retryData)
         }
 
-        guard statusCode == 200 else { throw URLError(.badServerResponse) }
+        guard statusCode == 200 else {
+            if let body = String(data: data, encoding: .utf8) {
+                print("[TickerService] Non-200 response body: \(body.prefix(500))")
+            }
+            throw URLError(.badServerResponse)
+        }
+
         return try parseQuotes(from: data)
     }
 
     private func parseQuotes(from data: Data) throws -> [String: Double] {
-        let decoded = try JSONDecoder().decode(YahooQuoteResponse.self, from: data)
-        var result: [String: Double] = [:]
-        for quote in decoded.quoteResponse.result {
-            result[quote.symbol] = quote.regularMarketPrice
+        do {
+            let decoded = try JSONDecoder().decode(YahooQuoteResponse.self, from: data)
+            var result: [String: Double] = [:]
+            for quote in decoded.quoteResponse.result {
+                if let price = quote.price {
+                    result[quote.symbol] = price
+                } else {
+                    print("[TickerService] \(quote.symbol): no price field in response, skipping")
+                }
+            }
+            return result
+        } catch {
+            print("[TickerService] JSON decode error: \(error)")
+            print("[TickerService] Raw response: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "nil")")
+            throw error
         }
-        return result
     }
 }
 
@@ -144,6 +182,9 @@ private struct YahooQuoteResponse: Decodable {
 
     struct Quote: Decodable {
         let symbol: String
-        let regularMarketPrice: Double
+        let regularMarketPrice: Double?
+        let regularMarketPreviousClose: Double?
+
+        var price: Double? { regularMarketPrice ?? regularMarketPreviousClose }
     }
 }

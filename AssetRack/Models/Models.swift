@@ -66,6 +66,7 @@ final class Holding {
     var name: String = ""
     var quantity: Double = 0.0
     var lastPrice: Double = 0.0
+    var lastPriceFetchedAt: Date? = nil
 
     var value: Double { lastPrice * quantity }
 
