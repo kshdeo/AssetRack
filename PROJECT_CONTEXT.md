@@ -238,6 +238,19 @@ Used only in `NetWorthApp.swift`. Kept separate so it's impossible to accidental
 
 ---
 
+## FX rate source
+
+**Current:** `FXRateService` fetches from [frankfurter.app](https://frankfurter.app) — free, no API key, backed by European Central Bank data, cached in `UserDefaults` and refreshed daily.
+
+**Investigated:** iOS has no system API for live exchange rates. `Locale` and `NumberFormatter` provide currency formatting and symbols only — no conversion rates. There is no `CoreFX` or equivalent framework.
+
+**Future options if frankfurter.app becomes unsuitable:**
+- [Open Exchange Rates](https://openexchangerates.org) — free tier available, API key required
+- [CurrencyAPI](https://currencyapi.com) — free tier, API key required
+- [Wise](https://wise.com/gb/currency-converter/) — no public API but real-time rates
+
+---
+
 ## Known gaps / TODO before App Store
 
 | Item | Notes |
