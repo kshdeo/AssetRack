@@ -40,14 +40,15 @@ final class TickerService {
 
         do {
             let prices = try await fetchPrices(symbols: joined)
-            print("[TickerService] Got \(prices.count) prices: \(prices)")
+            print("[TickerService] Got \(prices.count) prices: \(prices.mapValues { "\($0.price) \($0.currency)" })")
 
             let fetchedAt = Date()
             for account in accounts where account.type.supportsHoldings {
                 for holding in account.holdings {
-                    if let price = prices[holding.tickerSymbol] {
-                        print("[TickerService] \(holding.tickerSymbol): \(price)")
-                        holding.lastPrice = price
+                    if let result = prices[holding.tickerSymbol] {
+                        print("[TickerService] \(holding.tickerSymbol): \(result.price) \(result.currency)")
+                        holding.lastPrice = result.price
+                        holding.priceCurrency = result.currency
                         holding.lastPriceFetchedAt = fetchedAt
                     } else {
                         print("[TickerService] \(holding.tickerSymbol): no price in response")
@@ -108,7 +109,7 @@ final class TickerService {
         return crumbString
     }
 
-    private func fetchPrices(symbols: String) async throws -> [String: Double] {
+    private func fetchPrices(symbols: String) async throws -> [String: (price: Double, currency: String)] {
         if crumb == nil { crumb = try await fetchCrumb() }
         print("[TickerService] Using crumb: '\(crumb ?? "nil")'")
 
@@ -136,14 +137,14 @@ final class TickerService {
             retry.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
             let (retryData, retryResponse) = try await URLSession.shared.data(for: retry)
             let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? 0
-            print("[TickerService] Retry response status: \(retryStatus)")
+            print("[TickerService] Retry status: \(retryStatus)")
             guard retryStatus == 200 else { throw URLError(.badServerResponse) }
             return try parseQuotes(from: retryData)
         }
 
         guard statusCode == 200 else {
             if let body = String(data: data, encoding: .utf8) {
-                print("[TickerService] Non-200 response body: \(body.prefix(500))")
+                print("[TickerService] Non-200 response body: \(body)")
             }
             throw URLError(.badServerResponse)
         }
@@ -151,13 +152,13 @@ final class TickerService {
         return try parseQuotes(from: data)
     }
 
-    private func parseQuotes(from data: Data) throws -> [String: Double] {
+    private func parseQuotes(from data: Data) throws -> [String: (price: Double, currency: String)] {
         do {
             let decoded = try JSONDecoder().decode(YahooQuoteResponse.self, from: data)
-            var result: [String: Double] = [:]
+            var result: [String: (price: Double, currency: String)] = [:]
             for quote in decoded.quoteResponse.result {
-                if let price = quote.price {
-                    result[quote.symbol] = price
+                if let price = quote.normalisedPrice {
+                    result[quote.symbol] = (price, quote.normalisedCurrency)
                 } else {
                     print("[TickerService] \(quote.symbol): no price field in response, skipping")
                 }
@@ -184,7 +185,22 @@ private struct YahooQuoteResponse: Decodable {
         let symbol: String
         let regularMarketPrice: Double?
         let regularMarketPreviousClose: Double?
+        let currency: String?
 
-        var price: Double? { regularMarketPrice ?? regularMarketPreviousClose }
+        /// Normalised price: GBp/GBX (pence) divided by 100 to get GBP
+        var normalisedPrice: Double? {
+            guard let raw = regularMarketPrice ?? regularMarketPreviousClose else { return nil }
+            return isPence ? raw / 100.0 : raw
+        }
+
+        /// Normalised currency code: GBp/GBX → GBP
+        var normalisedCurrency: String {
+            guard let c = currency else { return "USD" }
+            return isPence ? "GBP" : c
+        }
+
+        private var isPence: Bool {
+            currency == "GBp" || currency == "GBX"
+        }
     }
 }
