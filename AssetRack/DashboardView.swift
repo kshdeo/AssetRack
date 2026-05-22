@@ -172,102 +172,132 @@ struct NetWorthChartCard: View {
     let snapshots: [NetWorthSnapshot]
     @Binding var selectedSnapshot: NetWorthSnapshot?
 
+    private var sorted: [NetWorthSnapshot] {
+        // One point per calendar day — keep the latest snapshot for each day
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: snapshots) {
+            calendar.startOfDay(for: $0.recordedAt)
+        }
+        return grouped
+            .values
+            .compactMap { $0.max(by: { $0.recordedAt < $1.recordedAt }) }
+            .sorted { $0.recordedAt < $1.recordedAt }
+    }
+
+    /// Green when net worth is flat or rising, red when falling.
+    private var trendColor: Color {
+        guard let first = sorted.first, let last = sorted.last else { return .green }
+        return last.netWorth >= first.netWorth ? .green : .red
+    }
+
     private var displayedValue: Double {
-        selectedSnapshot?.netWorth ?? snapshots.last?.netWorth ?? 0
+        selectedSnapshot?.netWorth ?? sorted.last?.netWorth ?? 0
     }
 
     private var displayedDate: Date? {
-        selectedSnapshot?.recordedAt ?? snapshots.last?.recordedAt
+        selectedSnapshot?.recordedAt ?? sorted.last?.recordedAt
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("History")
                 .font(.headline)
+                .padding(.bottom, 10)
 
-            if snapshots.isEmpty {
+            if sorted.isEmpty {
                 ContentUnavailableView("No history yet", systemImage: "chart.line.uptrend.xyaxis")
-                    .frame(height: 160)
+                    .frame(height: 180)
             } else {
-                VStack(alignment: .leading, spacing: 2) {
+                // Value + date header — updates while scrubbing
+                VStack(alignment: .leading, spacing: 1) {
                     Text(displayedValue.currencyFormatted())
-                        .font(.title2.weight(.semibold))
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(selectedSnapshot == nil ? .primary : trendColor)
                         .contentTransition(.numericText())
-                        .animation(.easeOut(duration: 0.15), value: displayedValue)
+                        .animation(.easeOut(duration: 0.1), value: displayedValue)
 
                     if let date = displayedDate {
-                        Text(date.formatted(.dateTime.month().year()))
+                        Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+                .padding(.bottom, 12)
 
-                Chart(snapshots) { snap in
+                Chart(sorted) { snap in
+                    // Subtle gradient fill below the line
                     AreaMark(
                         x: .value("Date", snap.recordedAt),
                         y: .value("Net Worth", snap.netWorth)
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.blue.opacity(0.3), .blue.opacity(0.05)],
+                            colors: [trendColor.opacity(0.15), trendColor.opacity(0.0)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
-                    .interpolationMethod(.catmullRom)
+                    .interpolationMethod(.linear)
 
+                    // Main line
                     LineMark(
                         x: .value("Date", snap.recordedAt),
                         y: .value("Net Worth", snap.netWorth)
                     )
-                    .foregroundStyle(.blue)
-                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(trendColor)
+                    .interpolationMethod(.linear)
                     .lineStyle(StrokeStyle(lineWidth: 2))
 
-                    if let selected = selectedSnapshot, selected.id == snap.id {
-                        PointMark(
-                            x: .value("Date", snap.recordedAt),
-                            y: .value("Net Worth", snap.netWorth)
-                        )
-                        .foregroundStyle(.blue)
-                        .symbolSize(80)
-                    }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .month, count: 3)) { _ in
-                        AxisGridLine()
-                        AxisValueLabel(format: .dateTime.month(.abbreviated))
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { value in
-                        AxisGridLine()
-                        AxisValueLabel {
-                            if let v = value.as(Double.self) {
-                                Text(v.currencyFormatted())
-                                    .font(.caption2)
-                            }
+                    // Scrub: vertical rule + dot
+                    if let selected = selectedSnapshot {
+                        RuleMark(x: .value("Date", selected.recordedAt))
+                            .foregroundStyle(.secondary.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+
+                        if selected.id == snap.id {
+                            PointMark(
+                                x: .value("Date", snap.recordedAt),
+                                y: .value("Net Worth", snap.netWorth)
+                            )
+                            .foregroundStyle(trendColor)
+                            .symbolSize(60)
                         }
                     }
                 }
-                .frame(height: 160)
+                // Don't anchor to zero — zoom into the actual range so movement is visible
+                .chartYScale(domain: .automatic(includesZero: false))
+                // Hide y-axis labels; the value is shown above
+                .chartYAxis(.hidden)
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondary)
+                    }
+                }
+                .frame(height: 180)
                 .chartOverlay { proxy in
                     GeometryReader { geo in
                         Rectangle().fill(.clear).contentShape(Rectangle())
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { drag in
-                                        let origin = geo[proxy.plotAreaFrame].origin
+                                        guard let plotFrame = proxy.plotFrame else { return }
+                                        let origin = geo[plotFrame].origin
                                         let x = drag.location.x - origin.x
                                         if let date: Date = proxy.value(atX: x) {
-                                            selectedSnapshot = snapshots.min {
-                                                abs($0.recordedAt.timeIntervalSince(date)) <
-                                                abs($1.recordedAt.timeIntervalSince(date))
+                                            withAnimation(.none) {
+                                                selectedSnapshot = sorted.min {
+                                                    abs($0.recordedAt.timeIntervalSince(date)) <
+                                                    abs($1.recordedAt.timeIntervalSince(date))
+                                                }
                                             }
                                         }
                                     }
                                     .onEnded { _ in
-                                        withAnimation { selectedSnapshot = nil }
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            selectedSnapshot = nil
+                                        }
                                     }
                             )
                     }
