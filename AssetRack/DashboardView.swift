@@ -8,7 +8,7 @@ struct DashboardView: View {
 
     @Environment(\.modelContext) private var modelContext
     @State private var vm = DashboardViewModel()
-    @State private var fx = FXRateService()
+    @State private var currency = CurrencyService()
     @State private var ticker = TickerService()
     @State private var selectedSnapshot: NetWorthSnapshot?
     @State private var showingAllAccounts = false
@@ -20,12 +20,16 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    let netWorth = vm.netWorth(from: accounts, currency: currency)
+                    let totalAssets = vm.totalAssets(from: accounts, currency: currency)
+                    let totalLiabilities = vm.totalLiabilities(from: accounts, currency: currency)
+
                     NetWorthHeroCard(
-                        netWorth: vm.netWorth(from: accounts, fx: fx),
-                        totalAssets: vm.totalAssets(from: accounts, fx: fx),
-                        totalLiabilities: vm.totalLiabilities(from: accounts, fx: fx),
+                        netWorth: netWorth.amount,
+                        totalAssets: totalAssets.amount,
+                        totalLiabilities: totalLiabilities.amount,
                         delta: vm.monthOverMonthDelta(from: snapshots),
-                        currency: fx.baseCurrency
+                        currency: currency.baseCurrency
                     )
 
                     NetWorthChartCard(
@@ -33,7 +37,7 @@ struct DashboardView: View {
                         selectedSnapshot: $selectedSnapshot
                     )
 
-                    AllocationCard(segments: vm.allocationSegments(from: accounts))
+                    AllocationCard(segments: vm.allocationSegments(from: accounts, currency: currency))
 
                     AccountsCard(
                         accounts: vm.topAccounts(from: accounts),
@@ -48,21 +52,21 @@ struct DashboardView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
             .navigationDestination(isPresented: $showingAllAccounts) {
-                AccountsListView(fx: fx, ticker: ticker)
+                AccountsListView(currency: currency, ticker: ticker)
             }
             .task {
-                await fx.fetchIfNeeded()
-                await ticker.fetchIfNeeded(context: modelContext)
+                await currency.fetchIfNeeded()
+                await ticker.fetchIfNeeded(context: modelContext, currency: currency)
             }
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showingSettings) {
-                SettingsView(fx: fx)
+                SettingsView(currency: currency)
             }
             .sheet(isPresented: $showingAddAccount, onDismiss: refreshTickers) {
-                AddEditAccountView()
+                AddEditAccountView(tickerService: ticker, currencyService: currency)
             }
             .sheet(item: $accountToEdit, onDismiss: refreshTickers) { account in
-                AddEditAccountView(editingAccount: account)
+                AddEditAccountView(editingAccount: account, tickerService: ticker, currencyService: currency)
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -90,7 +94,7 @@ extension DashboardView {
     func refreshTickers() {
         Task {
             try? await Task.sleep(for: .milliseconds(300))
-            await ticker.fetch(context: modelContext)
+            await ticker.fetch(context: modelContext, currency: currency)
         }
     }
 }

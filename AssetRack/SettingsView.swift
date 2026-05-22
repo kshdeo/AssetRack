@@ -2,15 +2,15 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var fx: FXRateService
+    @Bindable var currency: CurrencyService
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Currency", selection: $fx.baseCurrency) {
-                        ForEach(Currency.allCases, id: \.self) { currency in
-                            Text(currency.label).tag(currency.rawValue)
+                    Picker("Currency", selection: $currency.baseCurrency) {
+                        ForEach(Currency.allCases, id: \.self) { c in
+                            Text(c.label).tag(c.rawValue)
                         }
                     }
                 } header: {
@@ -20,18 +20,18 @@ struct SettingsView: View {
                 }
 
                 Section("Exchange Rates") {
-                    if fx.isLoading {
+                    if currency.isLoading {
                         HStack {
                             ProgressView()
                                 .padding(.trailing, 4)
                             Text("Updating rates…")
                                 .foregroundStyle(.secondary)
                         }
-                    } else if let error = fx.error {
+                    } else if let error = currency.error {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                             .font(.subheadline)
-                    } else if let date = fx.lastFetched {
+                    } else if let date = currency.lastFetched {
                         LabeledContent("Last updated") {
                             Text(date.formatted(.relative(presentation: .named)))
                                 .foregroundStyle(.secondary)
@@ -39,9 +39,9 @@ struct SettingsView: View {
                     }
 
                     Button("Refresh Now") {
-                        Task { await fx.fetch() }
+                        Task { await currency.fetch() }
                     }
-                    .disabled(fx.isLoading)
+                    .disabled(currency.isLoading)
                 }
             }
             .navigationTitle("Settings")
@@ -56,5 +56,5 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView(fx: FXRateService())
+    SettingsView(currency: CurrencyService())
 }

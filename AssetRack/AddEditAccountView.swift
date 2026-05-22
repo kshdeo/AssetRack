@@ -9,6 +9,7 @@ struct AddEditAccountView: View {
 
     var editingAccount: Account?
     var tickerService: TickerService?
+    var currencyService: CurrencyService?
 
     @State private var name: String = ""
     @State private var institution: String = ""
@@ -120,7 +121,7 @@ struct AddEditAccountView: View {
         .onAppear {
             prefill()
             if editingAccount?.type.supportsHoldings == true, let ts = tickerService {
-                Task { await ts.fetch(context: modelContext) }
+                Task { await ts.fetch(context: modelContext, currency: currencyService ?? CurrencyService()) }
             }
         }
     }
@@ -159,7 +160,7 @@ struct AddEditAccountView: View {
                             ProgressView().scaleEffect(0.7)
                         } else {
                             Button {
-                                Task { await ts.fetch(context: modelContext) }
+                                Task { await ts.fetch(context: modelContext, currency: currencyService ?? CurrencyService()) }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                                     .font(.caption)
@@ -196,7 +197,11 @@ struct AddEditAccountView: View {
 
             if !holdings.isEmpty || parsedCashBalance > 0 {
                 Section {
-                    let holdingsTotal = holdings.reduce(0.0) { $0 + ($1.existingHolding?.value ?? 0) }
+                    let holdingsTotal = holdings.reduce(0.0) { sum, draft in
+                        guard let h = draft.existingHolding else { return sum }
+                        let converted = currencyService?.convert(h.value, from: h.priceCurrency, to: selectedCurrency.code) ?? h.value
+                        return sum + converted
+                    }
                     let cash = parsedCashBalance
                     let total = holdingsTotal + cash
                     LabeledContent("Total") {

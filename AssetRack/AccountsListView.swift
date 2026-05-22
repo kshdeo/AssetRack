@@ -8,7 +8,7 @@ struct AccountsListView: View {
     @State private var accountToEdit: Account?
     @State private var showingAddAccount = false
 
-    @Bindable var fx: FXRateService
+    @Bindable var currency: CurrencyService
     @Bindable var ticker: TickerService
 
     private var grouped: [(category: AccountCategory, accounts: [Account])] {
@@ -44,10 +44,10 @@ struct AccountsListView: View {
             }
         }
         .sheet(isPresented: $showingAddAccount, onDismiss: refreshTickers) {
-            AddEditAccountView()
+            AddEditAccountView(tickerService: ticker, currencyService: currency)
         }
         .sheet(item: $accountToEdit, onDismiss: refreshTickers) { account in
-            AddEditAccountView(editingAccount: account)
+            AddEditAccountView(editingAccount: account, tickerService: ticker, currencyService: currency)
         }
         .overlay {
             if accounts.isEmpty {
@@ -61,13 +61,13 @@ struct AccountsListView: View {
     }
 
     private func refreshTickers() {
-        Task { await ticker.fetch(context: modelContext) }
+        Task { await ticker.fetch(context: modelContext, currency: currency) }
     }
 }
 
 #Preview {
     NavigationStack {
-        AccountsListView(fx: FXRateService(), ticker: TickerService())
+        AccountsListView(currency: CurrencyService(), ticker: TickerService())
             .modelContainer(ModelContainer.previewContainer)
     }
 }

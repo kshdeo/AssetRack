@@ -110,11 +110,13 @@ final class Account: Identifiable {
 
     var signedBalance: Double { isLiability ? -currentBalance : currentBalance }
 
-    /// For brokerage accounts, balance = sum of holdings + cash.
-    /// For all others, balance is manually entered.
-    func recomputeBalance() {
+    /// For brokerage accounts, balance = sum of holdings converted to account currency + cash.
+    /// Pass a `convert` closure to apply FX; defaults to no conversion (same-currency assumption).
+    func recomputeBalance(convert: (Double, String, String) -> Double = { amount, _, _ in amount }) {
         guard type.supportsHoldings else { return }
-        currentBalance = holdings.reduce(0) { $0 + $1.value } + cashBalance
+        currentBalance = holdings.reduce(0) { sum, holding in
+            sum + convert(holding.value, holding.priceCurrency, currency)
+        } + cashBalance
     }
 
     init(name: String, type: AccountType, balance: Double, institution: String = "", currency: String = "USD") {

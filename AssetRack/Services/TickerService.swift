@@ -15,15 +15,15 @@ final class TickerService {
         lastFetched = UserDefaults.standard.object(forKey: fetchedAtKey) as? Date
     }
 
-    func fetchIfNeeded(context: ModelContext) async {
+    func fetchIfNeeded(context: ModelContext, currency: CurrencyService) async {
         guard shouldFetch else {
             print("[TickerService] Skipping fetch — last fetched \(lastFetched?.formatted() ?? "never"), threshold not reached")
             return
         }
-        await fetch(context: context)
+        await fetch(context: context, currency: currency)
     }
 
-    func fetch(context: ModelContext) async {
+    func fetch(context: ModelContext, currency: CurrencyService) async {
         let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
         let allHoldings = accounts.flatMap { $0.holdings }
         guard !allHoldings.isEmpty else {
@@ -56,7 +56,7 @@ final class TickerService {
                     }
                 }
                 let oldBalance = account.currentBalance
-                account.recomputeBalance()
+                account.recomputeBalance(convert: currency.convert)
 
                 if abs(account.currentBalance - oldBalance) > 0.01 {
                     let snap = BalanceSnapshot(balance: account.currentBalance)

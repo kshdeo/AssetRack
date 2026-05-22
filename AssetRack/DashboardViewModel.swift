@@ -6,18 +6,22 @@ final class DashboardViewModel {
 
     // MARK: - Net worth
 
-    func netWorth(from accounts: [Account], fx: FXRateService) -> Double {
-        accounts.reduce(0) { $0 + fx.toBase($1.signedBalance, currency: $1.currency) }
+    func netWorth(from accounts: [Account], currency: CurrencyService) -> Money {
+        currency.sum(accounts.map { Money($0.signedBalance, $0.currency) }, in: currency.baseCurrency)
     }
 
-    func totalAssets(from accounts: [Account], fx: FXRateService) -> Double {
-        accounts.filter { !$0.isLiability }
-            .reduce(0) { $0 + fx.toBase($1.currentBalance, currency: $1.currency) }
+    func totalAssets(from accounts: [Account], currency: CurrencyService) -> Money {
+        currency.sum(
+            accounts.filter { !$0.isLiability }.map { Money($0.currentBalance, $0.currency) },
+            in: currency.baseCurrency
+        )
     }
 
-    func totalLiabilities(from accounts: [Account], fx: FXRateService) -> Double {
-        accounts.filter { $0.isLiability }
-            .reduce(0) { $0 + fx.toBase($1.currentBalance, currency: $1.currency) }
+    func totalLiabilities(from accounts: [Account], currency: CurrencyService) -> Money {
+        currency.sum(
+            accounts.filter { $0.isLiability }.map { Money($0.currentBalance, $0.currency) },
+            in: currency.baseCurrency
+        )
     }
 
     // MARK: - Chart
@@ -33,14 +37,18 @@ final class DashboardViewModel {
 
     // MARK: - Allocation
 
-    func allocationSegments(from accounts: [Account]) -> [(category: AccountCategory, value: Double, color: String)] {
+    func allocationSegments(from accounts: [Account], currency: CurrencyService) -> [(category: AccountCategory, value: Double, color: String)] {
         let assets = accounts.filter { !$0.isLiability }
-        let total = assets.reduce(0) { $0 + $1.currentBalance }
+        let total = currency.sum(assets.map { Money($0.currentBalance, $0.currency) }, in: currency.baseCurrency).amount
         guard total > 0 else { return [] }
 
         var grouped: [AccountCategory: Double] = [:]
         for account in assets {
-            grouped[account.type.category, default: 0] += account.currentBalance
+            grouped[account.type.category, default: 0] += currency.convert(
+                account.currentBalance,
+                from: account.currency,
+                to: currency.baseCurrency
+            )
         }
 
         return grouped

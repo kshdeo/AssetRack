@@ -1,8 +1,10 @@
 import Foundation
 import Observation
 
+/// Handles all currency conversion and money arithmetic in the app.
+/// Every addition or subtraction of amounts in different currencies must go through this service.
 @Observable
-final class FXRateService {
+final class CurrencyService {
     private(set) var rates: [String: Double] = [:]
     private(set) var lastFetched: Date?
     private(set) var isLoading = false
@@ -27,24 +29,24 @@ final class FXRateService {
         loadCache()
     }
 
+    // MARK: - Fetching
+
     func fetchIfNeeded() async {
         guard shouldFetch else { return }
         await fetch()
     }
 
     func fetch() async {
-        debugPrint("Fetch fx rates (base: \(baseCurrency))")
+        debugPrint("[CurrencyService] Fetching rates (base: \(baseCurrency))")
         isLoading = true
         error = nil
 
         do {
             let url = URL(string: "https://api.frankfurter.app/latest?from=\(baseCurrency)")!
             let (data, response) = try await URLSession.shared.data(from: url)
-
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
-
             let decoded = try JSONDecoder().decode(FrankfurterResponse.self, from: data)
             rates = decoded.rates
             lastFetched = Date()
@@ -56,6 +58,28 @@ final class FXRateService {
         isLoading = false
     }
 
+    // MARK: - Arithmetic
+
+    /// Convert an amount from one currency to another.
+    func convert(_ amount: Double, from: String, to: String) -> Double {
+        guard from != to else { return amount }
+        let inBase = toBase(amount, currency: from)
+        guard to != baseCurrency else { return inBase }
+        guard let toRate = rates[to], toRate > 0 else { return inBase }
+        return inBase * toRate
+    }
+
+    /// Convert a Money value to the target currency.
+    func convert(_ money: Money, to target: String) -> Money {
+        Money(convert(money.amount, from: money.currency, to: target), target)
+    }
+
+    /// Sum an array of Money values, converting each to the target currency, and return a Money result.
+    func sum(_ amounts: [Money], in target: String) -> Money {
+        Money(amounts.reduce(0) { $0 + convert($1.amount, from: $1.currency, to: target) }, target)
+    }
+
+    /// Convert an amount to the user's reporting base currency.
     func toBase(_ amount: Double, currency: String) -> Double {
         guard currency != baseCurrency else { return amount }
         guard let rate = rates[currency], rate > 0 else { return amount }
