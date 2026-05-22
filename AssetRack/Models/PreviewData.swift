@@ -70,12 +70,4 @@ extension ModelContainer {
         return container
     }()
 
-    static var appContainer: ModelContainer = {
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-        do {
-            return try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
 }
