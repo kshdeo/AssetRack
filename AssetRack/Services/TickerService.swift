@@ -31,8 +31,13 @@ final class TickerService {
             return
         }
 
+        guard !isLoading else {
+            print("[TickerService] Already loading — skipping concurrent fetch")
+            return
+        }
         isLoading = true
         errors = [:]
+        defer { isLoading = false }
 
         let symbols = Array(Set(allHoldings.map { $0.tickerSymbol }))
         let joined = symbols.joined(separator: ",")
@@ -60,7 +65,8 @@ final class TickerService {
 
                 if abs(account.currentBalance - oldBalance) > 0.01 {
                     let snap = BalanceSnapshot(balance: account.currentBalance)
-                    context.insert(snap)
+                    // SwiftData auto-inserts snap via the @Relationship cascade;
+                    // calling context.insert() explicitly would cause duplicate registration.
                     account.balanceHistory.append(snap)
                     account.updatedAt = Date()
                 }
@@ -70,14 +76,15 @@ final class TickerService {
             UserDefaults.standard.set(lastFetched, forKey: fetchedAtKey)
             try? context.save()
             print("[TickerService] Fetch complete, context saved")
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // Task was cancelled (e.g. refreshable gesture released) — not a real failure
+            print("[TickerService] Fetch cancelled")
         } catch {
             print("[TickerService] Fetch failed: \(error)")
             for symbol in symbols {
                 errors[symbol] = "Could not fetch price"
             }
         }
-
-        isLoading = false
     }
 
     // MARK: - Private

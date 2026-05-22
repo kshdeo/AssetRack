@@ -345,9 +345,8 @@ struct AddEditAccountView: View {
                 let balance = parsedBalance ?? 0
                 account.currentBalance = balance
                 account.updatedAt = balanceDate
-                let snap = BalanceSnapshot(balance: balance, recordedAt: balanceDate)
-                modelContext.insert(snap)
-                account.balanceHistory.append(snap)
+                // SwiftData auto-inserts via @Relationship — no explicit insert needed
+                account.balanceHistory.append(BalanceSnapshot(balance: balance, recordedAt: balanceDate))
             }
         } else {
             let account = Account(
@@ -361,17 +360,15 @@ struct AddEditAccountView: View {
 
             if selectedType.supportsHoldings {
                 for draft in holdings {
-                    let h = Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity)
-                    modelContext.insert(h)
-                    account.holdings.append(h)
+                    // account is in context — appending auto-inserts the Holding
+                    account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity))
                 }
                 account.cashBalance = parsedCashBalance
                 account.recomputeBalance()
             } else {
                 let balance = parsedBalance ?? 0
-                let snap = BalanceSnapshot(balance: balance)
-                modelContext.insert(snap)
-                account.balanceHistory.append(snap)
+                // account is in context — appending auto-inserts the BalanceSnapshot
+                account.balanceHistory.append(BalanceSnapshot(balance: balance))
             }
         }
 
@@ -393,9 +390,8 @@ struct AddEditAccountView: View {
                 existing.tickerSymbol = draft.tickerSymbol
                 existing.quantity = draft.quantity
             } else {
-                let h = Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity)
-                modelContext.insert(h)
-                account.holdings.append(h)
+                // account is already in context — appending auto-inserts the Holding
+                account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity))
             }
         }
     }

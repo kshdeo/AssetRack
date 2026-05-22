@@ -50,8 +50,15 @@ struct DashboardView: View {
                 .padding(.bottom, 32)
             }
             .refreshable {
-                await currency.fetch()
-                await ticker.fetch(context: modelContext, currency: currency)
+                // Wrap in an unstructured Task so the network requests are not
+                // subject to the refreshable's cooperative cancellation. SwiftUI
+                // can cancel the refreshable Task mid-scroll, which would
+                // propagate into URLSession and produce NSURLError -999.
+                let work = Task {
+                    await currency.fetch()
+                    await ticker.fetch(context: modelContext, currency: currency)
+                }
+                await work.value
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
