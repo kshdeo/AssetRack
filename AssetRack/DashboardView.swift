@@ -10,7 +10,7 @@ struct DashboardView: View {
     @State private var vm = DashboardViewModel()
     @State private var currencyService = CurrencyService()
     @State private var ticker = TickerService()
-    @State private var selectedSnapshot: NetWorthSnapshot?
+    @State private var selectedDate: Date?
     @State private var showingAllAccounts = false
     @State private var showingAddAccount = false
     @State private var showingSettings = false
@@ -23,18 +23,20 @@ struct DashboardView: View {
                     let netWorth = vm.netWorth(from: accounts, currency: currencyService)
                     let totalAssets = vm.totalAssets(from: accounts, currency: currencyService)
                     let totalLiabilities = vm.totalLiabilities(from: accounts, currency: currencyService)
+                    let stackedData = vm.stackedHistoryData(from: accounts, currency: currencyService)
 
                     NetWorthHeroCard(
                         netWorth: netWorth.amount,
                         totalAssets: totalAssets.amount,
                         totalLiabilities: totalLiabilities.amount,
-                        delta: vm.monthOverMonthDelta(from: snapshots),
+                        delta: vm.monthOverMonthDelta(from: stackedData),
                         currency: currencyService.baseCurrency
                     )
 
                     NetWorthChartCard(
-                        snapshots: snapshots,
-                        selectedSnapshot: $selectedSnapshot
+                        stackedData: stackedData,
+                        currency: currencyService.baseCurrency,
+                        selectedDate: $selectedDate
                     )
 
                     AllocationCard(segments: vm.allocationSegments(from: accounts, currency: currencyService))
@@ -173,36 +175,35 @@ struct NetWorthHeroCard: View {
 // MARK: - Chart Card
 
 struct NetWorthChartCard: View {
-    let snapshots: [NetWorthSnapshot]
-    @Binding var selectedSnapshot: NetWorthSnapshot?
-
-    private var sorted: [NetWorthSnapshot] {
-        // One point per calendar day — keep the latest snapshot for each day
-        let calendar = Calendar.current
-        let grouped = Dictionary(grouping: snapshots) {
-            calendar.startOfDay(for: $0.recordedAt)
-        }
-        return grouped
-            .values
-            .compactMap { $0.max(by: { $0.recordedAt < $1.recordedAt }) }
-            .sorted { $0.recordedAt < $1.recordedAt }
-    }
-
-    /// Green when net worth is flat or rising, red when falling.
-    private var trendColor: Color {
-        guard let first = sorted.first, let last = sorted.last else { return .green }
-        return last.netWorth >= first.netWorth ? .green : .red
-    }
-
-    private var displayedValue: Double {
-        selectedSnapshot?.netWorth ?? sorted.last?.netWorth ?? 0
-    }
-
-    private var displayedDate: Date? {
-        selectedSnapshot?.recordedAt ?? sorted.last?.recordedAt
-    }
+    let stackedData: [StackedDataPoint]
+    let currency: String
+    @Binding var selectedDate: Date?
 
     @State private var showingHistory = false
+
+    // Unique dates in ascending order
+    private var sortedDates: [Date] {
+        Array(Set(stackedData.map { $0.date })).sorted()
+    }
+
+    // The date to highlight in the header (scrubbed or latest)
+    private var displayDate: Date? {
+        selectedDate ?? sortedDates.last
+    }
+
+    // Total net worth for the display date
+    private var displayValue: Double {
+        guard let date = displayDate else { return 0 }
+        return stackedData.filter { $0.date == date }.map { $0.value }.reduce(0, +)
+    }
+
+    // Colors keyed by category raw value for chartForegroundStyleScale
+    private static let categoryColors: KeyValuePairs<String, Color> = [
+        AccountCategory.cashAndBank.rawValue: .teal,
+        AccountCategory.investments.rawValue: .blue,
+        AccountCategory.pension.rawValue:     .purple,
+        AccountCategory.realEstate.rawValue:  .indigo,
+    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -210,9 +211,7 @@ struct NetWorthChartCard: View {
                 Text("History")
                     .font(.headline)
                 Spacer()
-                Button {
-                    showingHistory = true
-                } label: {
+                Button { showingHistory = true } label: {
                     Image(systemName: "list.bullet")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -220,19 +219,18 @@ struct NetWorthChartCard: View {
             }
             .padding(.bottom, 10)
 
-            if sorted.isEmpty {
+            if stackedData.isEmpty {
                 ContentUnavailableView("No history yet", systemImage: "chart.line.uptrend.xyaxis")
                     .frame(height: 180)
             } else {
-                // Value + date header — updates while scrubbing
+                // Header: total + date, updates while scrubbing
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(displayedValue.currencyFormatted(code: sorted.last?.currency ?? "USD"))
+                    Text(displayValue.currencyFormatted(code: currency))
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(selectedSnapshot == nil ? .primary : trendColor)
                         .contentTransition(.numericText())
-                        .animation(.easeOut(duration: 0.1), value: displayedValue)
+                        .animation(.easeOut(duration: 0.1), value: displayValue)
 
-                    if let date = displayedDate {
+                    if let date = displayDate {
                         Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -240,49 +238,24 @@ struct NetWorthChartCard: View {
                 }
                 .padding(.bottom, 12)
 
-                Chart(sorted) { snap in
-                    // Subtle gradient fill below the line
+                Chart(stackedData) { point in
                     AreaMark(
-                        x: .value("Date", snap.recordedAt),
-                        y: .value("Net Worth", snap.netWorth)
+                        x: .value("Date", point.date),
+                        yStart: .value("Start", point.stackedStart),
+                        yEnd: .value("End", point.stackedEnd)
                     )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [trendColor.opacity(0.15), trendColor.opacity(0.0)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .foregroundStyle(by: .value("Category", point.category.rawValue))
                     .interpolationMethod(.linear)
 
-                    // Main line
-                    LineMark(
-                        x: .value("Date", snap.recordedAt),
-                        y: .value("Net Worth", snap.netWorth)
-                    )
-                    .foregroundStyle(trendColor)
-                    .interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 2))
-
-                    // Scrub: vertical rule + dot
-                    if let selected = selectedSnapshot {
-                        RuleMark(x: .value("Date", selected.recordedAt))
-                            .foregroundStyle(.secondary.opacity(0.4))
-                            .lineStyle(StrokeStyle(lineWidth: 1))
-
-                        if selected.id == snap.id {
-                            PointMark(
-                                x: .value("Date", snap.recordedAt),
-                                y: .value("Net Worth", snap.netWorth)
-                            )
-                            .foregroundStyle(trendColor)
-                            .symbolSize(60)
-                        }
+                    if let selected = selectedDate {
+                        RuleMark(x: .value("Selected", selected))
+                            .foregroundStyle(.secondary.opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     }
                 }
-                // Don't anchor to zero — zoom into the actual range so movement is visible
+                .chartForegroundStyleScale(Self.categoryColors)
+                .chartLegend(position: .bottom, alignment: .leading, spacing: 6)
                 .chartYScale(domain: .automatic(includesZero: false))
-                // Hide y-axis labels; the value is shown above
                 .chartYAxis(.hidden)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 4)) { _ in
@@ -291,7 +264,7 @@ struct NetWorthChartCard: View {
                             .foregroundStyle(Color.secondary)
                     }
                 }
-                .frame(height: 180)
+                .frame(height: 200)
                 .chartOverlay { proxy in
                     GeometryReader { geo in
                         Rectangle().fill(.clear).contentShape(Rectangle())
@@ -303,16 +276,16 @@ struct NetWorthChartCard: View {
                                         let x = drag.location.x - origin.x
                                         if let date: Date = proxy.value(atX: x) {
                                             withAnimation(.none) {
-                                                selectedSnapshot = sorted.min {
-                                                    abs($0.recordedAt.timeIntervalSince(date)) <
-                                                    abs($1.recordedAt.timeIntervalSince(date))
+                                                selectedDate = sortedDates.min {
+                                                    abs($0.timeIntervalSince(date)) <
+                                                    abs($1.timeIntervalSince(date))
                                                 }
                                             }
                                         }
                                     }
                                     .onEnded { _ in
                                         withAnimation(.easeOut(duration: 0.25)) {
-                                            selectedSnapshot = nil
+                                            selectedDate = nil
                                         }
                                     }
                             )
@@ -335,21 +308,27 @@ struct NetWorthHistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \NetWorthSnapshot.recordedAt, order: .reverse) private var snapshots: [NetWorthSnapshot]
 
+    @State private var snapshotToEdit: NetWorthSnapshot?
+
     var body: some View {
         NavigationStack {
             List {
                 ForEach(snapshots) { snap in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(snap.recordedAt.formatted(.dateTime.month(.abbreviated).day().year()))
-                                .font(.subheadline)
-                            Text(snap.recordedAt.formatted(.dateTime.hour().minute()))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    Button { snapshotToEdit = snap } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(snap.recordedAt.formatted(.dateTime.month(.abbreviated).day().year()))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                Text(snap.recordedAt.formatted(.dateTime.hour().minute()))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(snap.netWorth.currencyFormatted(code: snap.currency))
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
                         }
-                        Spacer()
-                        Text(snap.netWorth.currencyFormatted(code: snap.currency))
-                            .font(.subheadline.weight(.medium))
                     }
                 }
                 .onDelete { indices in
@@ -369,7 +348,69 @@ struct NetWorthHistoryView: View {
                     EditButton()
                 }
             }
+            .sheet(item: $snapshotToEdit) { snap in
+                EditSnapshotView(snapshot: snap)
+            }
         }
+    }
+}
+
+// MARK: - Edit Snapshot
+
+struct EditSnapshotView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @Bindable var snapshot: NetWorthSnapshot
+
+    @State private var netWorthText: String = ""
+    @State private var date: Date = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Date") {
+                    DatePicker("Date", selection: $date, displayedComponents: [.date])
+                        .labelsHidden()
+                }
+
+                Section("Net Worth (\(snapshot.currency))") {
+                    TextField("Amount", text: $netWorthText)
+                        .keyboardType(.decimalPad)
+                }
+            }
+            .navigationTitle("Edit Snapshot")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(parsedNetWorth == nil)
+                }
+            }
+        }
+        .onAppear {
+            date = snapshot.recordedAt
+            netWorthText = String(format: "%.2f", snapshot.netWorth)
+        }
+    }
+
+    private var parsedNetWorth: Double? {
+        Double(netWorthText.replacingOccurrences(of: ",", with: ""))
+    }
+
+    private func save() {
+        guard let value = parsedNetWorth else { return }
+        snapshot.recordedAt = date
+        snapshot.netWorth = value
+        // Keep totalAssets/totalLiabilities consistent with the edited net worth.
+        // If only netWorth changed, adjust totalAssets proportionally.
+        let delta = value - (snapshot.totalAssets - snapshot.totalLiabilities)
+        snapshot.totalAssets += delta
+        try? modelContext.save()
+        dismiss()
     }
 }
 

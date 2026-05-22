@@ -1,10 +1,27 @@
 import Foundation
 import Observation
 
+// MARK: - Stacked chart data
+
+struct StackedDataPoint: Identifiable {
+    let id = UUID()
+    let date: Date
+    let category: AccountCategory
+    let stackedStart: Double
+    let stackedEnd: Double
+
+    var value: Double { stackedEnd - stackedStart }
+}
+
+// MARK: - ViewModel
+
 @Observable
 final class DashboardViewModel {
 
-    // MARK: - Net worth
+    // Category order for stacking (bottom → top)
+    static let stackOrder: [AccountCategory] = [.cashAndBank, .investments, .pension, .realEstate]
+
+    // MARK: - Net worth (current)
 
     func netWorth(from accounts: [Account], currency: CurrencyService) -> Money {
         currency.sum(accounts.map { Money($0.signedBalance, $0.currency) }, in: currency.baseCurrency)
@@ -24,13 +41,68 @@ final class DashboardViewModel {
         )
     }
 
-    // MARK: - Chart
+    // MARK: - Stacked history (derived from BalanceSnapshot)
 
-    func monthOverMonthDelta(from snapshots: [NetWorthSnapshot]) -> Double? {
-        let sorted = snapshots.sorted { $0.recordedAt < $1.recordedAt }
-        guard sorted.count >= 2 else { return nil }
-        let prev = sorted[sorted.count - 2].netWorth
-        let curr = sorted[sorted.count - 1].netWorth
+    /// Builds stacked area chart data from per-account BalanceSnapshot history.
+    /// Uses current FX rates for currency conversion.
+    func stackedHistoryData(from accounts: [Account], currency: CurrencyService) -> [StackedDataPoint] {
+        let calendar = Calendar.current
+        let base = currency.baseCurrency
+
+        // Collect all unique calendar days that have at least one balance snapshot
+        let allDays = accounts.flatMap {
+            $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
+        }
+        let uniqueDays = Array(Set(allDays)).sorted()
+        guard !uniqueDays.isEmpty else { return [] }
+
+        var result: [StackedDataPoint] = []
+
+        for day in uniqueDays {
+            var categoryTotals: [AccountCategory: Double] = [:]
+
+            for account in accounts where !account.isLiability {
+                // Most recent snapshot on or before this day
+                guard let balance = account.balanceHistory
+                    .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
+                    .max(by: { $0.recordedAt < $1.recordedAt })?
+                    .balance else { continue }
+
+                let converted = currency.convert(Money(balance, account.currency), to: base).amount
+                categoryTotals[account.type.category, default: 0] += converted
+            }
+
+            // Build stacked segments bottom-up
+            var cumulative = 0.0
+            for category in Self.stackOrder {
+                let value = categoryTotals[category] ?? 0
+                guard value > 0 else { continue }
+                result.append(StackedDataPoint(
+                    date: day,
+                    category: category,
+                    stackedStart: cumulative,
+                    stackedEnd: cumulative + value
+                ))
+                cumulative += value
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - Month-over-month delta (derived from stacked data)
+
+    func monthOverMonthDelta(from stackedData: [StackedDataPoint]) -> Double? {
+        let dates = Array(Set(stackedData.map { $0.date })).sorted()
+        guard let lastDate = dates.last else { return nil }
+
+        let oneMonthAgo = Calendar.current.date(byAdding: .month, value: -1, to: lastDate)!
+        guard let prevDate = dates.min(by: {
+            abs($0.timeIntervalSince(oneMonthAgo)) < abs($1.timeIntervalSince(oneMonthAgo))
+        }), prevDate != lastDate else { return nil }
+
+        let prev = stackedData.filter { $0.date == prevDate }.map { $0.value }.reduce(0, +)
+        let curr = stackedData.filter { $0.date == lastDate }.map { $0.value }.reduce(0, +)
         guard prev != 0 else { return nil }
         return (curr - prev) / abs(prev)
     }
