@@ -49,6 +49,10 @@ struct DashboardView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
+            .refreshable {
+                await currency.fetch()
+                await ticker.fetch(context: modelContext, currency: currency)
+            }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
             .navigationDestination(isPresented: $showingAllAccounts) {
