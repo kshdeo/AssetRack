@@ -198,11 +198,23 @@ struct NetWorthChartCard: View {
         selectedSnapshot?.recordedAt ?? sorted.last?.recordedAt
     }
 
+    @State private var showingHistory = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("History")
-                .font(.headline)
-                .padding(.bottom, 10)
+            HStack {
+                Text("History")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showingHistory = true
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.bottom, 10)
 
             if sorted.isEmpty {
                 ContentUnavailableView("No history yet", systemImage: "chart.line.uptrend.xyaxis")
@@ -306,6 +318,54 @@ struct NetWorthChartCard: View {
         }
         .padding()
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .sheet(isPresented: $showingHistory) {
+            NetWorthHistoryView()
+        }
+    }
+}
+
+// MARK: - Net Worth History
+
+struct NetWorthHistoryView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \NetWorthSnapshot.recordedAt, order: .reverse) private var snapshots: [NetWorthSnapshot]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(snapshots) { snap in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(snap.recordedAt.formatted(.dateTime.month(.abbreviated).day().year()))
+                                .font(.subheadline)
+                            Text(snap.recordedAt.formatted(.dateTime.hour().minute()))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(snap.netWorth.currencyFormatted())
+                            .font(.subheadline.weight(.medium))
+                    }
+                }
+                .onDelete { indices in
+                    for index in indices {
+                        modelContext.delete(snapshots[index])
+                    }
+                    try? modelContext.save()
+                }
+            }
+            .navigationTitle("Net Worth History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    EditButton()
+                }
+            }
+        }
     }
 }
 
@@ -382,7 +442,7 @@ struct AccountsCard: View {
                 Text("Accounts")
                     .font(.headline)
                 Spacer()
-                if totalCount > 5 {
+                if totalCount > 10 {
                     Button("See All (\(totalCount))", action: onSeeAll)
                         .font(.subheadline)
                 }
