@@ -425,6 +425,7 @@ struct AllocationCard: View {
         switch name {
         case "teal":   return .teal
         case "blue":   return .blue
+        case "purple": return .purple
         case "indigo": return .indigo
         case "red":    return .red
         default:       return .gray

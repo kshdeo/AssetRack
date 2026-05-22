@@ -29,7 +29,8 @@ enum AccountType: String, CaseIterable, Codable {
     var category: AccountCategory {
         switch self {
         case .checking, .savings:               return .cashAndBank
-        case .brokerage, .pension:              return .investments
+        case .brokerage:                        return .investments
+        case .pension:                          return .pension
         case .realEstate:                       return .realEstate
         case .mortgage, .creditCard, .loan:     return .liabilities
         }
@@ -56,6 +57,7 @@ enum AccountType: String, CaseIterable, Codable {
 enum AccountCategory: String, CaseIterable {
     case cashAndBank   = "Cash & Bank"
     case investments   = "Investments"
+    case pension       = "Pension"
     case realEstate    = "Real Estate"
     case liabilities   = "Liabilities"
 }

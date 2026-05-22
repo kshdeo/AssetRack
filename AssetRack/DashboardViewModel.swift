@@ -59,6 +59,7 @@ final class DashboardViewModel {
         switch category {
         case .cashAndBank:  return "teal"
         case .investments:  return "blue"
+        case .pension:      return "purple"
         case .realEstate:   return "indigo"
         case .liabilities:  return "red"
         }
