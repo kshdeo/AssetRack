@@ -70,8 +70,8 @@ final class CurrencyService {
     }
 
     /// Convert a Money value to the target currency.
-    func convert(_ money: Money, to target: String) -> Money {
-        Money(convert(money.amount, from: money.currency, to: target), target)
+    func convert(_ money: Money, to currency: String) -> Money {
+        Money(convert(money.amount, from: money.currency, to: currency), currency)
     }
 
     /// Sum an array of Money values, converting each to the target currency, and return a Money result.

@@ -7,6 +7,7 @@ enum AccountType: String, CaseIterable, Codable {
     case checking = "checking"
     case savings = "savings"
     case brokerage = "brokerage"
+    case pension = "pension"
     case realEstate = "realEstate"
     case mortgage = "mortgage"
     case creditCard = "creditCard"
@@ -17,6 +18,7 @@ enum AccountType: String, CaseIterable, Codable {
         case .checking:    return "Checking"
         case .savings:     return "Savings"
         case .brokerage:   return "Brokerage"
+        case .pension:     return "Pension"
         case .realEstate:  return "Real Estate"
         case .mortgage:    return "Mortgage"
         case .creditCard:  return "Credit Card"
@@ -27,7 +29,7 @@ enum AccountType: String, CaseIterable, Codable {
     var category: AccountCategory {
         switch self {
         case .checking, .savings:               return .cashAndBank
-        case .brokerage:                        return .investments
+        case .brokerage, .pension:              return .investments
         case .realEstate:                       return .realEstate
         case .mortgage, .creditCard, .loan:     return .liabilities
         }
@@ -42,6 +44,7 @@ enum AccountType: String, CaseIterable, Codable {
         case .checking:    return "building.columns"
         case .savings:     return "banknote"
         case .brokerage:   return "chart.line.uptrend.xyaxis"
+        case .pension:     return "briefcase"
         case .realEstate:  return "house"
         case .mortgage:    return "house.and.flag"
         case .creditCard:  return "creditcard"
@@ -152,14 +155,42 @@ final class NetWorthSnapshot {
     var netWorth: Double = 0.0
     var totalAssets: Double = 0.0
     var totalLiabilities: Double = 0.0
+    var currency: String = "USD"
     var recordedAt: Date = Date()
 
-    init(netWorth: Double, totalAssets: Double, totalLiabilities: Double, recordedAt: Date = Date()) {
+    init(netWorth: Double, totalAssets: Double, totalLiabilities: Double, currency: String = "USD", recordedAt: Date = Date()) {
         self.id = UUID()
         self.netWorth = netWorth
         self.totalAssets = totalAssets
         self.totalLiabilities = totalLiabilities
+        self.currency = currency
         self.recordedAt = recordedAt
+    }
+}
+
+// MARK: - ModelContext helpers
+
+extension ModelContext {
+    /// Record a net worth snapshot using proper multi-currency conversion.
+    /// Call this whenever account balances change (save, delete, ticker refresh).
+    func recordNetWorthSnapshot(currency: CurrencyService, at date: Date = Date()) {
+        let accounts = (try? fetch(FetchDescriptor<Account>())) ?? []
+        let base = currency.baseCurrency
+        let assets = currency.sum(
+            accounts.filter { !$0.isLiability }.map { Money($0.currentBalance, $0.currency) },
+            in: base
+        ).amount
+        let liabilities = currency.sum(
+            accounts.filter { $0.isLiability }.map { Money($0.currentBalance, $0.currency) },
+            in: base
+        ).amount
+        insert(NetWorthSnapshot(
+            netWorth: assets - liabilities,
+            totalAssets: assets,
+            totalLiabilities: liabilities,
+            currency: base,
+            recordedAt: date
+        ))
     }
 }
 

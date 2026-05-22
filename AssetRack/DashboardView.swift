@@ -8,7 +8,7 @@ struct DashboardView: View {
 
     @Environment(\.modelContext) private var modelContext
     @State private var vm = DashboardViewModel()
-    @State private var currency = CurrencyService()
+    @State private var currencyService = CurrencyService()
     @State private var ticker = TickerService()
     @State private var selectedSnapshot: NetWorthSnapshot?
     @State private var showingAllAccounts = false
@@ -20,16 +20,16 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    let netWorth = vm.netWorth(from: accounts, currency: currency)
-                    let totalAssets = vm.totalAssets(from: accounts, currency: currency)
-                    let totalLiabilities = vm.totalLiabilities(from: accounts, currency: currency)
+                    let netWorth = vm.netWorth(from: accounts, currency: currencyService)
+                    let totalAssets = vm.totalAssets(from: accounts, currency: currencyService)
+                    let totalLiabilities = vm.totalLiabilities(from: accounts, currency: currencyService)
 
                     NetWorthHeroCard(
                         netWorth: netWorth.amount,
                         totalAssets: totalAssets.amount,
                         totalLiabilities: totalLiabilities.amount,
                         delta: vm.monthOverMonthDelta(from: snapshots),
-                        currency: currency.baseCurrency
+                        currency: currencyService.baseCurrency
                     )
 
                     NetWorthChartCard(
@@ -37,7 +37,7 @@ struct DashboardView: View {
                         selectedSnapshot: $selectedSnapshot
                     )
 
-                    AllocationCard(segments: vm.allocationSegments(from: accounts, currency: currency))
+                    AllocationCard(segments: vm.allocationSegments(from: accounts, currency: currencyService))
 
                     AccountsCard(
                         accounts: vm.topAccounts(from: accounts),
@@ -55,29 +55,31 @@ struct DashboardView: View {
                 // can cancel the refreshable Task mid-scroll, which would
                 // propagate into URLSession and produce NSURLError -999.
                 let work = Task {
-                    await currency.fetch()
-                    await ticker.fetch(context: modelContext, currency: currency)
+                    await currencyService.fetch()
+                    await ticker.fetch(context: modelContext, currency: currencyService)
+                    modelContext.recordNetWorthSnapshot(currency: currencyService)
+                    try? modelContext.save()
                 }
                 await work.value
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Net Worth")
             .navigationDestination(isPresented: $showingAllAccounts) {
-                AccountsListView(currency: currency, ticker: ticker)
+                AccountsListView(currency: currencyService, ticker: ticker)
             }
             .task {
-                await currency.fetchIfNeeded()
-                await ticker.fetchIfNeeded(context: modelContext, currency: currency)
+                await currencyService.fetchIfNeeded()
+                await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
             }
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showingSettings) {
-                SettingsView(currency: currency)
+                SettingsView(currency: currencyService)
             }
             .sheet(isPresented: $showingAddAccount, onDismiss: refreshTickers) {
-                AddEditAccountView(tickerService: ticker, currencyService: currency)
+                AddEditAccountView(tickerService: ticker, currencyService: currencyService)
             }
             .sheet(item: $accountToEdit, onDismiss: refreshTickers) { account in
-                AddEditAccountView(editingAccount: account, tickerService: ticker, currencyService: currency)
+                AddEditAccountView(editingAccount: account, tickerService: ticker, currencyService: currencyService)
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -105,7 +107,9 @@ extension DashboardView {
     func refreshTickers() {
         Task {
             try? await Task.sleep(for: .milliseconds(300))
-            await ticker.fetch(context: modelContext, currency: currency)
+            await ticker.fetch(context: modelContext, currency: currencyService)
+            modelContext.recordNetWorthSnapshot(currency: currencyService)
+            try? modelContext.save()
         }
     }
 }
@@ -222,7 +226,7 @@ struct NetWorthChartCard: View {
             } else {
                 // Value + date header — updates while scrubbing
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(displayedValue.currencyFormatted())
+                    Text(displayedValue.currencyFormatted(code: sorted.last?.currency ?? "USD"))
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(selectedSnapshot == nil ? .primary : trendColor)
                         .contentTransition(.numericText())
@@ -344,7 +348,7 @@ struct NetWorthHistoryView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(snap.netWorth.currencyFormatted())
+                        Text(snap.netWorth.currencyFormatted(code: snap.currency))
                             .font(.subheadline.weight(.medium))
                     }
                 }

@@ -49,6 +49,23 @@ struct AddEditAccountView: View {
         return Double(cleaned) ?? 0
     }
 
+    private var holdingsTotal: String {
+        let holdingAmounts = holdings.compactMap { draft -> Money? in
+            guard let h = draft.existingHolding else { return nil }
+            return Money(h.value, h.priceCurrency)
+        }
+        let holdingsValue = currencyService?.sum(holdingAmounts, in: selectedCurrency.code).amount ?? 0
+        return (holdingsValue + parsedCashBalance).currencyFormatted(code: selectedCurrency.code)
+    }
+
+    private var showHoldingsTotal: Bool {
+        !holdings.isEmpty || parsedCashBalance > 0
+    }
+
+    private var hasPendingPrices: Bool {
+        holdings.contains { $0.existingHolding?.lastPrice == 0 || $0.existingHolding == nil }
+    }
+
     private var canSave: Bool {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         if selectedType.supportsHoldings { return true }
@@ -195,21 +212,14 @@ struct AddEditAccountView: View {
                 Text("Cash held in this brokerage account, separate from your holdings.")
             }
 
-            if !holdings.isEmpty || parsedCashBalance > 0 {
+            if showHoldingsTotal {
                 Section {
-                    let holdingsTotal = holdings.reduce(0.0) { sum, draft in
-                        guard let h = draft.existingHolding else { return sum }
-                        let converted = currencyService?.convert(h.value, from: h.priceCurrency, to: selectedCurrency.code) ?? h.value
-                        return sum + converted
-                    }
-                    let cash = parsedCashBalance
-                    let total = holdingsTotal + cash
                     LabeledContent("Total") {
-                        Text(total.currencyFormatted(code: selectedCurrency.code))
+                        Text(holdingsTotal)
                             .fontWeight(.semibold)
                     }
                 } footer: {
-                    if holdings.contains(where: { $0.existingHolding?.lastPrice == 0 || $0.existingHolding == nil }) {
+                    if hasPendingPrices {
                         Text("Holdings without a fetched price are excluded from the total.")
                     }
                 }
@@ -405,16 +415,7 @@ struct AddEditAccountView: View {
     }
 
     private func recordNetWorthSnapshot(at date: Date) {
-        let allAccounts = (try? modelContext.fetch(FetchDescriptor<Account>())) ?? []
-        let assets = allAccounts.filter { !$0.isLiability }.reduce(0) { $0 + $1.currentBalance }
-        let liabilities = allAccounts.filter { $0.isLiability }.reduce(0) { $0 + $1.currentBalance }
-        let snap = NetWorthSnapshot(
-            netWorth: assets - liabilities,
-            totalAssets: assets,
-            totalLiabilities: liabilities,
-            recordedAt: date
-        )
-        modelContext.insert(snap)
+        modelContext.recordNetWorthSnapshot(currency: currencyService ?? CurrencyService(), at: date)
     }
 }
 

@@ -45,10 +45,9 @@ final class DashboardViewModel {
         var grouped: [AccountCategory: Double] = [:]
         for account in assets {
             grouped[account.type.category, default: 0] += currency.convert(
-                account.currentBalance,
-                from: account.currency,
+                Money(account.currentBalance, account.currency),
                 to: currency.baseCurrency
-            )
+            ).amount
         }
 
         return grouped
