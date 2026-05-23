@@ -23,6 +23,7 @@ struct DashboardView: View {
                     let totalAssets = vm.totalAssets(from: accounts, currency: currencyService)
                     let totalLiabilities = vm.totalLiabilities(from: accounts, currency: currencyService)
                     let stackedData = vm.stackedHistoryData(from: accounts, currency: currencyService)
+                    let historyEntries = vm.accountHistoryEntries(from: accounts, currency: currencyService)
 
                     NetWorthHeroCard(
                         netWorth: netWorth.amount,
@@ -34,6 +35,7 @@ struct DashboardView: View {
 
                     NetWorthChartCard(
                         stackedData: stackedData,
+                        historyEntries: historyEntries,
                         currencyService: currencyService,
                         selectedDate: $selectedDate
                     )
@@ -175,6 +177,7 @@ struct NetWorthHeroCard: View {
 
 struct NetWorthChartCard: View {
     let stackedData: [StackedDataPoint]
+    let historyEntries: [DashboardViewModel.AccountHistoryEntry]
     let currencyService: CurrencyService
     @Binding var selectedDate: Date?
 
@@ -192,10 +195,10 @@ struct NetWorthChartCard: View {
         selectedDate ?? sortedDates.last
     }
 
-    // Total net worth for the display date
+    // Net worth for the display date: assets − liabilities, all carry-forward
     private var displayValue: Double {
         guard let date = displayDate else { return 0 }
-        return stackedData.filter { $0.date == date }.map { $0.value }.reduce(0, +)
+        return historyEntries.first(where: { $0.date == date })?.totalInBase ?? 0
     }
 
     // Colors keyed by category raw value for chartForegroundStyleScale
@@ -297,7 +300,7 @@ struct NetWorthChartCard: View {
         .padding()
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
         .sheet(isPresented: $showingHistory) {
-            NetWorthHistoryView(currencyService: currencyService)
+            NetWorthHistoryView(entries: historyEntries, currencyService: currencyService)
         }
     }
 }
@@ -306,15 +309,9 @@ struct NetWorthChartCard: View {
 
 struct NetWorthHistoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query private var accounts: [Account]
 
+    let entries: [DashboardViewModel.AccountHistoryEntry]
     let currencyService: CurrencyService
-
-    @State private var vm = DashboardViewModel()
-
-    private var entries: [DashboardViewModel.AccountHistoryEntry] {
-        vm.accountHistoryEntries(from: accounts, currency: currencyService)
-    }
 
     var body: some View {
         NavigationStack {
@@ -370,12 +367,17 @@ struct HistoryDayDetailView: View {
         _date = State(initialValue: entry.date)
     }
 
+    // Only rows that have an exact snapshot for this day can be edited or date-shifted.
+    private var editableRows: [DashboardViewModel.AccountHistoryEntry.AccountRow] {
+        entry.rows.filter { !$0.isCarriedForward }
+    }
+
     private var hasChanges: Bool {
         if date != entry.date { return true }
-        return entry.rows.contains { row in
+        return editableRows.contains { row in
             guard let text = balanceTexts[row.id],
                   let value = Double(text.replacingOccurrences(of: ",", with: "")) else { return false }
-            return value != row.snapshot.balance
+            return value != row.balance
         }
     }
 
@@ -386,26 +388,39 @@ struct HistoryDayDetailView: View {
                     .labelsHidden()
             }
 
-            Section("Account Balances") {
+            Section {
                 ForEach(entry.rows) { row in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.accountName)
                                 .font(.subheadline)
+                                .foregroundStyle(row.isCarriedForward ? .secondary : .primary)
                             Text(row.currency)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        TextField("0", text: Binding(
-                            get: { balanceTexts[row.id] ?? "" },
-                            set: { balanceTexts[row.id] = $0 }
-                        ))
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(maxWidth: 140)
-                        .foregroundStyle(row.isLiability ? .red : .primary)
+                        if row.isCarriedForward {
+                            Text(row.balance.currencyFormatted(code: row.currency))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            TextField("0", text: Binding(
+                                get: { balanceTexts[row.id] ?? "" },
+                                set: { balanceTexts[row.id] = $0 }
+                            ))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 140)
+                            .foregroundStyle(row.isLiability ? .red : .primary)
+                        }
                     }
+                }
+            } header: {
+                Text("Account Balances")
+            } footer: {
+                if entry.rows.contains(where: { $0.isCarriedForward }) {
+                    Text("Greyed values are carried forward from a previous date and cannot be edited here.")
                 }
             }
         }
@@ -418,22 +433,23 @@ struct HistoryDayDetailView: View {
             }
         }
         .onAppear {
-            for row in entry.rows {
-                balanceTexts[row.id] = String(format: "%.2f", row.snapshot.balance)
+            for row in editableRows {
+                balanceTexts[row.id] = String(format: "%.2f", row.balance)
             }
         }
     }
 
     private func save() {
         let cal = Calendar.current
-        for row in entry.rows {
+        for row in editableRows {
+            guard let snapshot = row.snapshot else { continue }
             if let text = balanceTexts[row.id],
                let value = Double(text.replacingOccurrences(of: ",", with: "")) {
-                row.snapshot.balance = value
+                snapshot.balance = value
             }
-            // Preserve the original time-of-day, only move the calendar date
-            let originalTime = row.snapshot.recordedAt
-            row.snapshot.recordedAt = cal.date(
+            // Preserve time-of-day, only shift the calendar date
+            let originalTime = snapshot.recordedAt
+            snapshot.recordedAt = cal.date(
                 bySettingHour: cal.component(.hour, from: originalTime),
                 minute: cal.component(.minute, from: originalTime),
                 second: cal.component(.second, from: originalTime),

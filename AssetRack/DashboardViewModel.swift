@@ -48,13 +48,18 @@ final class DashboardViewModel {
     func stackedHistoryData(from accounts: [Account], currency: CurrencyService) -> [StackedDataPoint] {
         let calendar = Calendar.current
         let base = currency.baseCurrency
+        let today = calendar.startOfDay(for: Date())
 
-        // Collect all unique calendar days that have at least one balance snapshot
-        let allDays = accounts.flatMap {
+        // Collect all unique calendar days from snapshots, always including today
+        var daySet = Set(accounts.flatMap {
             $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
-        }
-        let uniqueDays = Array(Set(allDays)).sorted()
-        guard !uniqueDays.isEmpty else { return [] }
+        })
+        daySet.insert(today)
+        let uniqueDays = daySet.sorted()
+
+        // Need at least one snapshot somewhere to draw history
+        let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
+        guard hasAnySnapshot else { return [] }
 
         var result: [StackedDataPoint] = []
 
@@ -62,11 +67,17 @@ final class DashboardViewModel {
             var categoryTotals: [AccountCategory: Double] = [:]
 
             for account in accounts where !account.isLiability {
-                // Most recent snapshot on or before this day
-                guard let balance = account.balanceHistory
-                    .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
-                    .max(by: { $0.recordedAt < $1.recordedAt })?
-                    .balance else { continue }
+                // For today use the live balance; for past days carry-forward from snapshots
+                let balance: Double
+                if day == today {
+                    balance = account.currentBalance
+                } else {
+                    guard let snap = account.balanceHistory
+                        .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
+                        .max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
+                    balance = snap.balance
+                }
+                guard balance > 0 else { continue }
 
                 let converted = currency.convert(Money(balance, account.currency), to: base).amount
                 categoryTotals[account.type.category, default: 0] += converted
@@ -97,54 +108,82 @@ final class DashboardViewModel {
         let date: Date
         let baseCurrency: String
         let totalInBase: Double
-        /// One row per account that recorded a snapshot on this exact calendar day.
+        /// All accounts with a known balance on or before this date.
         let rows: [AccountRow]
 
         struct AccountRow: Identifiable {
-            let id: UUID          // snapshot id
+            /// Account id — stable even for carried-forward rows.
+            let id: UUID
             let accountName: String
             let isLiability: Bool
             let currency: String
-            let snapshot: BalanceSnapshot
+            let balance: Double
+            /// Non-nil only when there is a snapshot recorded on this exact calendar day.
+            /// Nil means the value is carried forward from a previous day (read-only).
+            let snapshot: BalanceSnapshot?
+            var isCarriedForward: Bool { snapshot == nil }
         }
     }
 
     func accountHistoryEntries(from accounts: [Account], currency: CurrencyService) -> [AccountHistoryEntry] {
         let calendar = Calendar.current
         let base = currency.baseCurrency
+        let today = calendar.startOfDay(for: Date())
 
-        // Group all snapshots by calendar day, keeping the latest per account per day
-        var dayMap: [Date: [(account: Account, snapshot: BalanceSnapshot)]] = [:]
-        for account in accounts {
-            let byDay = Dictionary(grouping: account.balanceHistory) {
-                calendar.startOfDay(for: $0.recordedAt)
-            }
-            for (day, snaps) in byDay {
-                guard let latest = snaps.max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
-                dayMap[day, default: []].append((account, latest))
-            }
-        }
+        // Unique days from snapshots, always including today
+        var daySet = Set(accounts.flatMap {
+            $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
+        })
+        daySet.insert(today)
+        let uniqueDays = daySet.sorted().reversed()
 
-        return dayMap
-            .sorted { $0.key > $1.key }   // most recent first
-            .map { day, pairs in
-                let rows: [AccountHistoryEntry.AccountRow] = pairs
-                    .sorted { $0.account.name < $1.account.name }
-                    .map { account, snapshot in
-                        AccountHistoryEntry.AccountRow(
-                            id: snapshot.id,
-                            accountName: account.name,
-                            isLiability: account.isLiability,
-                            currency: account.currency,
-                            snapshot: snapshot
-                        )
-                    }
-                let total = rows.reduce(0.0) { sum, row in
-                    let signed = row.isLiability ? -row.snapshot.balance : row.snapshot.balance
-                    return sum + currency.convert(Money(signed, row.currency), to: base).amount
+        let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
+        guard hasAnySnapshot else { return [] }
+
+        return uniqueDays.map { day in
+            var rows: [AccountHistoryEntry.AccountRow] = []
+            var total = 0.0
+
+            for account in accounts {
+                let balance: Double
+                let exact: BalanceSnapshot?
+
+                if day == today {
+                    // Always use live balance for today's entry
+                    balance = account.currentBalance
+                    exact = nil   // today's synthetic entry is not directly editable
+                } else {
+                    // Carry-forward: most recent snapshot on or before this day
+                    guard let latest = account.balanceHistory
+                        .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
+                        .max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
+                    balance = latest.balance
+                    // Exact snapshot for this day (editable)
+                    exact = account.balanceHistory
+                        .filter({ calendar.startOfDay(for: $0.recordedAt) == day })
+                        .max(by: { $0.recordedAt < $1.recordedAt })
                 }
-                return AccountHistoryEntry(date: day, baseCurrency: base, totalInBase: total, rows: rows)
+
+                let signed = account.isLiability ? -balance : balance
+                total += currency.convert(Money(signed, account.currency), to: base).amount
+
+                rows.append(AccountHistoryEntry.AccountRow(
+                    id: account.id,
+                    accountName: account.name,
+                    isLiability: account.isLiability,
+                    currency: account.currency,
+                    balance: balance,
+                    snapshot: exact
+                ))
             }
+
+            return AccountHistoryEntry(
+                date: day,
+                baseCurrency: base,
+                totalInBase: total,
+                rows: rows.sorted { $0.accountName < $1.accountName }
+            )
+        }
     }
 
     // MARK: - Month-over-month delta (derived from stacked data)
