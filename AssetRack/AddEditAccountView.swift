@@ -56,7 +56,7 @@ struct AddEditAccountView: View {
             return Money(h.value, h.priceCurrency)
         }
         let holdingsValue = currencyService?.sum(holdingAmounts, in: selectedCurrency.code).amount ?? 0
-        return (holdingsValue + parsedCashBalance).currencyFormatted(code: selectedCurrency.code)
+        return currencyService?.formatted(Money(holdingsValue + parsedCashBalance, selectedCurrency.code)) ?? (holdingsValue + parsedCashBalance).currencyFormatted(code: selectedCurrency.code)
     }
 
     private var showHoldingsTotal: Bool {

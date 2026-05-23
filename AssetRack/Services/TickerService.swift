@@ -15,6 +15,7 @@ final class TickerService {
         lastFetched = UserDefaults.standard.object(forKey: fetchedAtKey) as? Date
     }
 
+    @MainActor
     func fetchIfNeeded(context: ModelContext, currency: CurrencyService) async {
         guard shouldFetch else {
             print("[TickerService] Skipping fetch — last fetched \(lastFetched?.formatted() ?? "never"), threshold not reached")
@@ -23,6 +24,7 @@ final class TickerService {
         await fetch(context: context, currency: currency)
     }
 
+    @MainActor
     func fetch(context: ModelContext, currency: CurrencyService) async {
         let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
         let allHoldings = accounts.flatMap { $0.holdings }

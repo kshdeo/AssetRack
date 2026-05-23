@@ -30,7 +30,7 @@ struct DashboardView: View {
                         totalAssets: totalAssets.amount,
                         totalLiabilities: totalLiabilities.amount,
                         delta: vm.monthOverMonthDelta(from: stackedData),
-                        currency: currencyService.baseCurrency
+                        currencyService: currencyService
                     )
 
                     NetWorthChartCard(
@@ -45,6 +45,7 @@ struct DashboardView: View {
                     AccountsCard(
                         accounts: vm.topAccounts(from: accounts),
                         totalCount: accounts.count,
+                        currencyService: currencyService,
                         onSeeAll: { showingAllAccounts = true },
                         onEdit: { accountToEdit = $0 }
                     )
@@ -124,7 +125,7 @@ struct NetWorthHeroCard: View {
     let totalAssets: Double
     let totalLiabilities: Double
     let delta: Double?
-    var currency: String = "USD"
+    let currencyService: CurrencyService
 
     var body: some View {
         VStack(spacing: 6) {
@@ -132,7 +133,7 @@ struct NetWorthHeroCard: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(netWorth.currencyFormatted(code: currency))
+            Text(currencyService.formattedBase(netWorth))
                 .font(.system(size: 42, weight: .bold, design: .rounded))
                 .contentTransition(.numericText())
                 .animation(.spring(duration: 0.4), value: netWorth)
@@ -153,7 +154,7 @@ struct NetWorthHeroCard: View {
                     Text("Assets")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(totalAssets.currencyFormatted(code: currency))
+                    Text(currencyService.formattedBase(totalAssets))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.green)
                 }
@@ -162,7 +163,7 @@ struct NetWorthHeroCard: View {
                     Text("Liabilities")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(totalLiabilities.currencyFormatted(code: currency))
+                    Text(currencyService.formattedBase(totalLiabilities))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.red)
                 }
@@ -229,7 +230,7 @@ struct NetWorthChartCard: View {
             } else {
                 // Header: total + date, updates while scrubbing
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(displayValue.currencyFormatted(code: currency))
+                    Text(currencyService.formattedBase(displayValue))
                         .font(.title3.weight(.semibold))
                         .contentTransition(.numericText())
                         .animation(.easeOut(duration: 0.1), value: displayValue)
@@ -313,6 +314,8 @@ struct NetWorthHistoryView: View {
     let entries: [DashboardViewModel.AccountHistoryEntry]
     let currencyService: CurrencyService
 
+    @State private var showingAddEntry = false
+
     var body: some View {
         NavigationStack {
             Group {
@@ -322,13 +325,13 @@ struct NetWorthHistoryView: View {
                     List {
                         ForEach(entries) { entry in
                             NavigationLink {
-                                HistoryDayDetailView(entry: entry, baseCurrency: currencyService.baseCurrency)
+                                HistoryDayDetailView(entry: entry, currencyService: currencyService)
                             } label: {
                                 HStack {
                                     Text(entry.date.formatted(.dateTime.month(.abbreviated).day().year()))
                                         .font(.subheadline)
                                     Spacer()
-                                    Text(entry.totalInBase.currencyFormatted(code: entry.baseCurrency))
+                                    Text(currencyService.formattedBase(entry.totalInBase))
                                         .font(.subheadline.weight(.medium))
                                         .foregroundStyle(.secondary)
                                 }
@@ -344,6 +347,14 @@ struct NetWorthHistoryView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingAddEntry = true } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingAddEntry) {
+                AddHistoricalEntryView(currencyService: currencyService)
             }
         }
     }
@@ -356,14 +367,14 @@ struct HistoryDayDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     let entry: DashboardViewModel.AccountHistoryEntry
-    let baseCurrency: String
+    let currencyService: CurrencyService
 
     @State private var date: Date
     @State private var balanceTexts: [UUID: String] = [:]
 
-    init(entry: DashboardViewModel.AccountHistoryEntry, baseCurrency: String) {
+    init(entry: DashboardViewModel.AccountHistoryEntry, currencyService: CurrencyService) {
         self.entry = entry
-        self.baseCurrency = baseCurrency
+        self.currencyService = currencyService
         _date = State(initialValue: entry.date)
     }
 
@@ -381,11 +392,33 @@ struct HistoryDayDetailView: View {
         }
     }
 
+    private var liveTotal: Double {
+        let amounts: [Money] = entry.rows.map { row in
+            let balance: Double
+            if row.isCarriedForward {
+                balance = row.balance
+            } else if let text = balanceTexts[row.id],
+                      let value = Double(text.replacingOccurrences(of: ",", with: "")) {
+                balance = value
+            } else {
+                balance = row.balance
+            }
+            let signed = row.isLiability ? -balance : balance
+            return Money(signed, row.currency)
+        }
+        return currencyService.sum(amounts, in: currencyService.baseCurrency).amount
+    }
+
     var body: some View {
         Form {
-            Section("Date") {
+            Section {
                 DatePicker("Date", selection: $date, in: ...Date(), displayedComponents: [.date])
-                    .labelsHidden()
+                LabeledContent("Net Worth") {
+                    Text(currencyService.formattedBase(liveTotal))
+                        .font(.headline)
+                        .contentTransition(.numericText())
+                        .animation(.easeOut(duration: 0.15), value: liveTotal)
+                }
             }
 
             Section {
@@ -401,7 +434,7 @@ struct HistoryDayDetailView: View {
                         }
                         Spacer()
                         if row.isCarriedForward {
-                            Text(row.balance.currencyFormatted(code: row.currency))
+                            Text(currencyService.formatted(Money(row.balance, row.currency)))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -526,6 +559,7 @@ struct AllocationCard: View {
 struct AccountsCard: View {
     let accounts: [Account]
     let totalCount: Int
+    let currencyService: CurrencyService
     let onSeeAll: () -> Void
     let onEdit: (Account) -> Void
 
@@ -549,7 +583,7 @@ struct AccountsCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
                         Button { onEdit(account) } label: {
-                            AccountRow(account: account)
+                            AccountRow(account: account, currencyService: currencyService)
                         }
                         .buttonStyle(.plain)
 
@@ -562,44 +596,6 @@ struct AccountsCard: View {
         }
         .padding()
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-struct AccountRow: View {
-    let account: Account
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: account.type.systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(account.isLiability ? .red : .blue)
-                .frame(width: 32, height: 32)
-                .background(
-                    (account.isLiability ? Color.red : Color.blue).opacity(0.12),
-                    in: RoundedRectangle(cornerRadius: 8)
-                )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(account.name)
-                    .font(.subheadline.weight(.medium))
-                HStack(spacing: 4) {
-                    Text(account.type.displayName)
-                    if account.hasHoldings {
-                        Text("·")
-                        Text("^[\(account.holdings.count) holding](inflect: true)")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Text(account.currentBalance.currencyFormatted(code: account.currency))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(account.isLiability ? .red : .primary)
-        }
-        .padding(.vertical, 6)
     }
 }
 

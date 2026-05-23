@@ -86,6 +86,18 @@ final class CurrencyService {
         return amount / rate
     }
 
+    // MARK: - Formatting
+
+    /// Format a `Money` value in its own currency.
+    func formatted(_ money: Money) -> String {
+        money.amount.currencyFormatted(code: money.currency)
+    }
+
+    /// Format an amount in the user's base (reporting) currency.
+    func formattedBase(_ amount: Double) -> String {
+        amount.currencyFormatted(code: baseCurrency)
+    }
+
     // MARK: - Private
 
     private var shouldFetch: Bool {

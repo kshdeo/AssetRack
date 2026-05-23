@@ -25,7 +25,7 @@ struct AccountsListView: View {
                 Section(group.category.rawValue) {
                     ForEach(group.accounts) { account in
                         Button { accountToEdit = account } label: {
-                            AccountRow(account: account)
+                            AccountRow(account: account, currencyService: currency)
                         }
                         .buttonStyle(.plain)
                     }
