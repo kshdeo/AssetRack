@@ -29,6 +29,12 @@ final class CurrencyService {
         loadCache()
     }
 
+    /// Initialiser for unit tests — bypasses network fetch and UserDefaults.
+    init(baseCurrency: String, rates: [String: Double]) {
+        self.baseCurrency = baseCurrency
+        self.rates = rates
+    }
+
     // MARK: - Fetching
 
     func fetchIfNeeded() async {
