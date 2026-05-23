@@ -51,12 +51,15 @@ struct AddEditAccountView: View {
     }
 
     private var holdingsTotal: String {
-        let holdingAmounts = holdings.compactMap { draft -> Money? in
+        let amounts: [Money] = holdings.compactMap { draft in
             guard let h = draft.existingHolding else { return nil }
             return Money(h.value, h.priceCurrency)
+        } + [Money(parsedCashBalance, selectedCurrency.code)]
+
+        guard let cs = currencyService else {
+            return Money(parsedCashBalance, selectedCurrency.code).formatted()
         }
-        let holdingsValue = currencyService?.sum(holdingAmounts, in: selectedCurrency.code).amount ?? 0
-        return currencyService?.formatted(Money(holdingsValue + parsedCashBalance, selectedCurrency.code)) ?? (holdingsValue + parsedCashBalance).currencyFormatted(code: selectedCurrency.code)
+        return cs.formatted(cs.sum(amounts, in: selectedCurrency.code))
     }
 
     private var showHoldingsTotal: Bool {
