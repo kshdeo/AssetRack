@@ -16,7 +16,7 @@ final class CurrencyService {
             UserDefaults.standard.set(baseCurrency, forKey: baseCurrencyKey)
             rates = [:]
             lastFetched = nil
-            Task { await fetch() }
+            Task { @MainActor in await fetch() }
         }
     }
 

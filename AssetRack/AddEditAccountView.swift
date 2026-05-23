@@ -22,6 +22,7 @@ struct AddEditAccountView: View {
     @State private var showingAddHolding = false
     @State private var holdingToEdit: HoldingDraft?
     @State private var showingDeleteConfirm = false
+    @State private var showingBalanceHistory = false
 
     struct HoldingDraft: Identifiable {
         var id = UUID()
@@ -134,6 +135,11 @@ struct AddEditAccountView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingBalanceHistory) {
+                if let account = editingAccount {
+                    AccountBalanceHistoryView(account: account)
+                }
+            }
         }
         .onAppear {
             prefill()
@@ -229,6 +235,7 @@ struct AddEditAccountView: View {
 
     // MARK: - Balance Section (non-brokerage)
 
+    @ViewBuilder
     private var balanceSection: some View {
         Section(selectedType.isLiability ? "Amount Owed" : "Current Balance") {
             Picker("Currency", selection: $selectedCurrency) {
@@ -257,6 +264,25 @@ struct AddEditAccountView: View {
                 Text("Enter the amount you owe as a positive number.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+
+        if isEditing, let account = editingAccount {
+            Section {
+                Button {
+                    showingBalanceHistory = true
+                } label: {
+                    HStack {
+                        Text("Balance History")
+                        Spacer()
+                        Text("^[\(account.balanceHistory.count) entry](inflect: true)")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .foregroundStyle(.primary)
             }
         }
     }
@@ -544,6 +570,127 @@ struct AddHoldingView: View {
             existingHolding: existing?.existingHolding
         )
         onSave(draft)
+        dismiss()
+    }
+}
+
+// MARK: - Account Balance History
+
+struct AccountBalanceHistoryView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    var account: Account
+
+    @State private var snapshotToEdit: BalanceSnapshot?
+
+    private var sorted: [BalanceSnapshot] {
+        account.balanceHistory.sorted { $0.recordedAt > $1.recordedAt }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if sorted.isEmpty {
+                    ContentUnavailableView("No history yet", systemImage: "clock.arrow.circlepath")
+                } else {
+                    List {
+                        ForEach(sorted) { snap in
+                            Button { snapshotToEdit = snap } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(snap.recordedAt.formatted(.dateTime.month(.abbreviated).day().year()))
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                        Text(snap.recordedAt.formatted(.dateTime.hour().minute()))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(snap.balance.currencyFormatted(code: account.currency))
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                }
+                            }
+                        }
+                        .onDelete { indices in
+                            for index in indices {
+                                modelContext.delete(sorted[index])
+                            }
+                            try? modelContext.save()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("\(account.name) History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    EditButton()
+                }
+            }
+            .sheet(item: $snapshotToEdit) { snap in
+                EditBalanceSnapshotView(snapshot: snap, currency: account.currency)
+            }
+        }
+    }
+}
+
+// MARK: - Edit Balance Snapshot
+
+struct EditBalanceSnapshotView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @Bindable var snapshot: BalanceSnapshot
+    let currency: String
+
+    @State private var balanceText: String = ""
+    @State private var date: Date = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Date") {
+                    DatePicker("Date", selection: $date, in: ...Date(), displayedComponents: [.date])
+                        .labelsHidden()
+                }
+
+                Section("Balance (\(currency))") {
+                    TextField("Amount", text: $balanceText)
+                        .keyboardType(.decimalPad)
+                }
+            }
+            .navigationTitle("Edit Balance")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(parsedBalance == nil)
+                }
+            }
+        }
+        .onAppear {
+            date = snapshot.recordedAt
+            balanceText = String(format: "%.2f", snapshot.balance)
+        }
+    }
+
+    private var parsedBalance: Double? {
+        Double(balanceText.replacingOccurrences(of: ",", with: ""))
+    }
+
+    private func save() {
+        guard let value = parsedBalance else { return }
+        snapshot.balance = value
+        snapshot.recordedAt = date
+        try? modelContext.save()
         dismiss()
     }
 }

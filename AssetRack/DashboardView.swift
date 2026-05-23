@@ -4,7 +4,6 @@ import Charts
 
 struct DashboardView: View {
     @Query private var accounts: [Account]
-    @Query(sort: \NetWorthSnapshot.recordedAt) private var snapshots: [NetWorthSnapshot]
 
     @Environment(\.modelContext) private var modelContext
     @State private var vm = DashboardViewModel()
@@ -35,7 +34,7 @@ struct DashboardView: View {
 
                     NetWorthChartCard(
                         stackedData: stackedData,
-                        currency: currencyService.baseCurrency,
+                        currencyService: currencyService,
                         selectedDate: $selectedDate
                     )
 
@@ -56,7 +55,7 @@ struct DashboardView: View {
                 // subject to the refreshable's cooperative cancellation. SwiftUI
                 // can cancel the refreshable Task mid-scroll, which would
                 // propagate into URLSession and produce NSURLError -999.
-                let work = Task {
+                let work = Task { @MainActor in
                     await currencyService.fetch()
                     await ticker.fetch(context: modelContext, currency: currencyService)
                     modelContext.recordNetWorthSnapshot(currency: currencyService)
@@ -107,7 +106,7 @@ struct DashboardView: View {
 
 extension DashboardView {
     func refreshTickers() {
-        Task {
+        Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(300))
             await ticker.fetch(context: modelContext, currency: currencyService)
             modelContext.recordNetWorthSnapshot(currency: currencyService)
@@ -176,10 +175,12 @@ struct NetWorthHeroCard: View {
 
 struct NetWorthChartCard: View {
     let stackedData: [StackedDataPoint]
-    let currency: String
+    let currencyService: CurrencyService
     @Binding var selectedDate: Date?
 
     @State private var showingHistory = false
+
+    private var currency: String { currencyService.baseCurrency }
 
     // Unique dates in ascending order
     private var sortedDates: [Date] {
@@ -296,119 +297,149 @@ struct NetWorthChartCard: View {
         .padding()
         .background(.background, in: RoundedRectangle(cornerRadius: 16))
         .sheet(isPresented: $showingHistory) {
-            NetWorthHistoryView()
+            NetWorthHistoryView(currencyService: currencyService)
         }
     }
 }
 
-// MARK: - Net Worth History
+// MARK: - Net Worth History (date list)
 
 struct NetWorthHistoryView: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \NetWorthSnapshot.recordedAt, order: .reverse) private var snapshots: [NetWorthSnapshot]
+    @Query private var accounts: [Account]
 
-    @State private var snapshotToEdit: NetWorthSnapshot?
+    let currencyService: CurrencyService
+
+    @State private var vm = DashboardViewModel()
+
+    private var entries: [DashboardViewModel.AccountHistoryEntry] {
+        vm.accountHistoryEntries(from: accounts, currency: currencyService)
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(snapshots) { snap in
-                    Button { snapshotToEdit = snap } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(snap.recordedAt.formatted(.dateTime.month(.abbreviated).day().year()))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-                                Text(snap.recordedAt.formatted(.dateTime.hour().minute()))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            Group {
+                if entries.isEmpty {
+                    ContentUnavailableView("No history yet", systemImage: "clock.arrow.circlepath")
+                } else {
+                    List {
+                        ForEach(entries) { entry in
+                            NavigationLink {
+                                HistoryDayDetailView(entry: entry, baseCurrency: currencyService.baseCurrency)
+                            } label: {
+                                HStack {
+                                    Text(entry.date.formatted(.dateTime.month(.abbreviated).day().year()))
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text(entry.totalInBase.currencyFormatted(code: entry.baseCurrency))
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
                             }
-                            Spacer()
-                            Text(snap.netWorth.currencyFormatted(code: snap.currency))
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.primary)
                         }
                     }
                 }
-                .onDelete { indices in
-                    for index in indices {
-                        modelContext.delete(snapshots[index])
-                    }
-                    try? modelContext.save()
-                }
             }
-            .navigationTitle("Net Worth History")
+            .navigationTitle("Balance History")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    EditButton()
-                }
-            }
-            .sheet(item: $snapshotToEdit) { snap in
-                EditSnapshotView(snapshot: snap)
             }
         }
     }
 }
 
-// MARK: - Edit Snapshot
+// MARK: - History Day Detail (per-account balances, all editable)
 
-struct EditSnapshotView: View {
+struct HistoryDayDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    @Bindable var snapshot: NetWorthSnapshot
+    let entry: DashboardViewModel.AccountHistoryEntry
+    let baseCurrency: String
 
-    @State private var netWorthText: String = ""
-    @State private var date: Date = Date()
+    @State private var date: Date
+    @State private var balanceTexts: [UUID: String] = [:]
+
+    init(entry: DashboardViewModel.AccountHistoryEntry, baseCurrency: String) {
+        self.entry = entry
+        self.baseCurrency = baseCurrency
+        _date = State(initialValue: entry.date)
+    }
+
+    private var hasChanges: Bool {
+        if date != entry.date { return true }
+        return entry.rows.contains { row in
+            guard let text = balanceTexts[row.id],
+                  let value = Double(text.replacingOccurrences(of: ",", with: "")) else { return false }
+            return value != row.snapshot.balance
+        }
+    }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Date") {
-                    DatePicker("Date", selection: $date, displayedComponents: [.date])
-                        .labelsHidden()
-                }
+        Form {
+            Section("Date") {
+                DatePicker("Date", selection: $date, in: ...Date(), displayedComponents: [.date])
+                    .labelsHidden()
+            }
 
-                Section("Net Worth (\(snapshot.currency))") {
-                    TextField("Amount", text: $netWorthText)
+            Section("Account Balances") {
+                ForEach(entry.rows) { row in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.accountName)
+                                .font(.subheadline)
+                            Text(row.currency)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        TextField("0", text: Binding(
+                            get: { balanceTexts[row.id] ?? "" },
+                            set: { balanceTexts[row.id] = $0 }
+                        ))
                         .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: 140)
+                        .foregroundStyle(row.isLiability ? .red : .primary)
+                    }
                 }
             }
-            .navigationTitle("Edit Snapshot")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .disabled(parsedNetWorth == nil)
-                }
+        }
+        .navigationTitle(entry.date.formatted(.dateTime.month(.abbreviated).day().year()))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { save() }
+                    .disabled(!hasChanges)
             }
         }
         .onAppear {
-            date = snapshot.recordedAt
-            netWorthText = String(format: "%.2f", snapshot.netWorth)
+            for row in entry.rows {
+                balanceTexts[row.id] = String(format: "%.2f", row.snapshot.balance)
+            }
         }
     }
 
-    private var parsedNetWorth: Double? {
-        Double(netWorthText.replacingOccurrences(of: ",", with: ""))
-    }
-
     private func save() {
-        guard let value = parsedNetWorth else { return }
-        snapshot.recordedAt = date
-        snapshot.netWorth = value
-        // Keep totalAssets/totalLiabilities consistent with the edited net worth.
-        // If only netWorth changed, adjust totalAssets proportionally.
-        let delta = value - (snapshot.totalAssets - snapshot.totalLiabilities)
-        snapshot.totalAssets += delta
+        let cal = Calendar.current
+        for row in entry.rows {
+            if let text = balanceTexts[row.id],
+               let value = Double(text.replacingOccurrences(of: ",", with: "")) {
+                row.snapshot.balance = value
+            }
+            // Preserve the original time-of-day, only move the calendar date
+            let originalTime = row.snapshot.recordedAt
+            row.snapshot.recordedAt = cal.date(
+                bySettingHour: cal.component(.hour, from: originalTime),
+                minute: cal.component(.minute, from: originalTime),
+                second: cal.component(.second, from: originalTime),
+                of: date
+            ) ?? date
+        }
         try? modelContext.save()
         dismiss()
     }

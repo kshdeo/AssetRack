@@ -90,6 +90,63 @@ final class DashboardViewModel {
         return result
     }
 
+    // MARK: - Per-account history entries (for the list view)
+
+    struct AccountHistoryEntry: Identifiable {
+        let id = UUID()
+        let date: Date
+        let baseCurrency: String
+        let totalInBase: Double
+        /// One row per account that recorded a snapshot on this exact calendar day.
+        let rows: [AccountRow]
+
+        struct AccountRow: Identifiable {
+            let id: UUID          // snapshot id
+            let accountName: String
+            let isLiability: Bool
+            let currency: String
+            let snapshot: BalanceSnapshot
+        }
+    }
+
+    func accountHistoryEntries(from accounts: [Account], currency: CurrencyService) -> [AccountHistoryEntry] {
+        let calendar = Calendar.current
+        let base = currency.baseCurrency
+
+        // Group all snapshots by calendar day, keeping the latest per account per day
+        var dayMap: [Date: [(account: Account, snapshot: BalanceSnapshot)]] = [:]
+        for account in accounts {
+            let byDay = Dictionary(grouping: account.balanceHistory) {
+                calendar.startOfDay(for: $0.recordedAt)
+            }
+            for (day, snaps) in byDay {
+                guard let latest = snaps.max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
+                dayMap[day, default: []].append((account, latest))
+            }
+        }
+
+        return dayMap
+            .sorted { $0.key > $1.key }   // most recent first
+            .map { day, pairs in
+                let rows: [AccountHistoryEntry.AccountRow] = pairs
+                    .sorted { $0.account.name < $1.account.name }
+                    .map { account, snapshot in
+                        AccountHistoryEntry.AccountRow(
+                            id: snapshot.id,
+                            accountName: account.name,
+                            isLiability: account.isLiability,
+                            currency: account.currency,
+                            snapshot: snapshot
+                        )
+                    }
+                let total = rows.reduce(0.0) { sum, row in
+                    let signed = row.isLiability ? -row.snapshot.balance : row.snapshot.balance
+                    return sum + currency.convert(Money(signed, row.currency), to: base).amount
+                }
+                return AccountHistoryEntry(date: day, baseCurrency: base, totalInBase: total, rows: rows)
+            }
+    }
+
     // MARK: - Month-over-month delta (derived from stacked data)
 
     func monthOverMonthDelta(from stackedData: [StackedDataPoint]) -> Double? {
