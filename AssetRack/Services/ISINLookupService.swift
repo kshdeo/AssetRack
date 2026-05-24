@@ -55,36 +55,81 @@ struct ISINLookupService {
     }
 
     private func parseTradegatResults(from html: String) -> [StockSearchResult] {
-        // Tradegate search result rows contain a link of the form:
-        //   href="/order_book.php?isin=DE0007664039&lang=en">Volkswagen AG</a>
-        // The ISIN is in the href; the company name is the link text.
-        let pattern = #"href="/order_book\.php\?isin=([A-Z]{2}[A-Z0-9]{10})[^"]*">([^<]+)</a>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-
-        let nsHtml = html as NSString
-        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
-
-        var seen = Set<String>()
-        var results: [StockSearchResult] = []
-
-        for match in matches {
-            guard match.numberOfRanges >= 3 else { continue }
-            let isin = nsHtml.substring(with: match.range(at: 1))
-            let name = nsHtml.substring(with: match.range(at: 2))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard !isin.isEmpty, !name.isEmpty, !seen.contains(isin) else { continue }
-            seen.insert(isin)
-
-            results.append(StockSearchResult(
-                symbol: isin,
-                description: name,
-                displaySymbol: isin,
-                type: "Tradegate",
-                resolvedISIN: isin
-            ))
+        // ── Case 1: multi-result search page
+        // Links look like: href="orderbuch.php?lang=en&amp;isin=DE0007664039">Volkswagen AG</a>
+        // Note: it's "orderbuch.php" (German), parameters may appear in any order,
+        // and the ISIN separator is "&amp;" in HTML.
+        let linkPattern = #"href="/?orderbuch\.php\?[^"]*isin=([A-Z]{2}[A-Z0-9]{10})[^"]*">([^<]{3,})</a>"#
+        if let regex = try? NSRegularExpression(pattern: linkPattern) {
+            let nsHtml = html as NSString
+            let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            var seen = Set<String>()
+            var results: [StockSearchResult] = []
+            for match in matches {
+                guard match.numberOfRanges >= 3 else { continue }
+                let isin = nsHtml.substring(with: match.range(at: 1))
+                let name = nsHtml.substring(with: match.range(at: 2))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !seen.contains(isin), !name.isEmpty else { continue }
+                seen.insert(isin)
+                results.append(StockSearchResult(
+                    symbol: isin,
+                    description: name,
+                    displaySymbol: isin,   // ticker column not available in list view
+                    type: "Tradegate",
+                    resolvedISIN: isin
+                ))
+            }
+            if !results.isEmpty { return results }
         }
-        return results
+
+        // ── Case 2: single-result redirect to order book page
+        // Tradegate redirects directly to the order book when there's exactly one match.
+        // Extract ISIN, name, and ticker code from the structured page data.
+        return singleResultFromOrderBook(html)
+    }
+
+    private func singleResultFromOrderBook(_ html: String) -> [StockSearchResult] {
+        // ISIN from JS variable: var isin = "US4581401001";
+        let isinPattern = #"var isin = "([A-Z]{2}[A-Z0-9]{10})""#
+        guard let isinRegex = try? NSRegularExpression(pattern: isinPattern),
+              let isinMatch = isinRegex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              isinMatch.numberOfRanges >= 2 else { return [] }
+        let isin = (html as NSString).substring(with: isinMatch.range(at: 1))
+
+        // Name from the classless <h2> tag (the stock name has no class;
+        // sidebar headings use class="wie_bild" or "kurslisten").
+        let namePattern = #"<h2>([^<]+)</h2>"#
+        let name: String
+        if let nameRegex = try? NSRegularExpression(pattern: namePattern),
+           let nameMatch = nameRegex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+           nameMatch.numberOfRanges >= 2 {
+            name = (html as NSString).substring(with: nameMatch.range(at: 1))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            name = isin
+        }
+
+        // Ticker code from the WKN/Code/ISIN info table.
+        // Structure: <td>WKN</td> <td>CODE</td> <td>ISIN</td>
+        // The two copyToClipboard cells before the ISIN cell give us WKN then Code.
+        let tickerPattern = #"ondblclick="copyToClipboard\(this\)">[A-Z0-9]+</td>\s*<td ondblclick="copyToClipboard\(this\)">([A-Z0-9]+)</td>"#
+        let ticker: String
+        if let tickerRegex = try? NSRegularExpression(pattern: tickerPattern),
+           let tickerMatch = tickerRegex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+           tickerMatch.numberOfRanges >= 2 {
+            ticker = (html as NSString).substring(with: tickerMatch.range(at: 1))
+        } else {
+            ticker = isin
+        }
+
+        return [StockSearchResult(
+            symbol: isin,
+            description: name,
+            displaySymbol: ticker,
+            type: "Tradegate",
+            resolvedISIN: isin
+        )]
     }
 
     // MARK: - Finnhub search (for Yahoo Finance symbol discovery)

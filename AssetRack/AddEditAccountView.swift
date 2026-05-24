@@ -728,9 +728,11 @@ struct AddHoldingView: View {
 
     @MainActor
     private func selectResult(_ result: StockSearchResult) {
-        // For Tradegate results resolvedISIN is always set — fill it immediately, no second call needed.
-        // For Yahoo Finance results we only need the ticker symbol; ISIN is not required.
-        tickerSymbol  = result.description  // use company name as the display label
+        // For Tradegate: use the ticker code (displaySymbol) when it differs from the ISIN,
+        // otherwise fall back to the company name as a readable label.
+        // For Yahoo Finance: displaySymbol is the proper ticker (e.g. "AAPL").
+        let isRealTicker = result.displaySymbol != result.resolvedISIN
+        tickerSymbol  = isRealTicker ? result.displaySymbol : result.description
         searchQuery   = result.description
         searchResults = []
         if let resolvedISIN = result.resolvedISIN {
