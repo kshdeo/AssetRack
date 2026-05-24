@@ -475,7 +475,7 @@ struct HoldingDraftRow: View {
                     }
                 }
                 if let existing = draft.existingHolding, existing.lastPrice > 0 {
-                    Text("\(draft.quantity.formatted()) @ \(existing.lastPrice.currencyFormatted(code: existing.priceCurrency))")
+                    Text("\(draft.quantity.formatted()) @ \(existing.lastPrice.currencyFormatted(code: existing.priceCurrency, fractionDigits: 2))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .contentTransition(.numericText())
@@ -504,7 +504,7 @@ struct HoldingPriceView: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
             if holding.lastPrice > 0 {
-                Text(holding.value.currencyFormatted(code: holding.priceCurrency))
+                Text(holding.value.currencyFormatted(code: holding.priceCurrency, fractionDigits: 2))
                     .font(.subheadline.weight(.semibold))
                     .contentTransition(.numericText())
                 if let fetchedAt = holding.lastPriceFetchedAt {

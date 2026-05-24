@@ -224,11 +224,12 @@ extension ModelContext {
 // MARK: - Formatting helpers
 
 extension Double {
-    func currencyFormatted(code: String = "USD") -> String {
+    func currencyFormatted(code: String = "USD", fractionDigits: Int = 0) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = code
-        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = fractionDigits
+        formatter.maximumFractionDigits = fractionDigits
         return formatter.string(from: NSNumber(value: self)) ?? "$0"
     }
 }
