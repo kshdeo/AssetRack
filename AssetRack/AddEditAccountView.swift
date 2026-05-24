@@ -530,6 +530,7 @@ struct HoldingPriceView: View {
 
 struct AddHoldingView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
 
     var existing: AddEditAccountView.HoldingDraft?
     var onSave: (AddEditAccountView.HoldingDraft) -> Void
@@ -538,6 +539,16 @@ struct AddHoldingView: View {
     @State private var tickerSymbol: String = ""
     @State private var isin: String = ""
     @State private var quantityText: String = ""
+
+    // Tradegate search
+    @State private var searchQuery: String = ""
+    @State private var searchResults: [StockSearchResult] = []
+    @State private var isSearching = false
+    @State private var isinLoading = false
+    @State private var searchError: String?
+    @State private var searchTask: Task<Void, Never>?
+
+    private let lookupService = ISINLookupService()
 
     private var parsedQuantity: Double? { Double(quantityText) }
     private var canSave: Bool {
@@ -552,6 +563,7 @@ struct AddHoldingView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Source picker
                 Section {
                     Picker("Price source", selection: $priceSource) {
                         ForEach(PriceSource.allCases, id: \.self) { source in
@@ -559,30 +571,25 @@ struct AddHoldingView: View {
                         }
                     }
                 }
+                .onChange(of: priceSource) { _, _ in
+                    searchResults = []
+                    searchQuery = ""
+                    searchError = nil
+                }
 
+                if priceSource == .tradegate {
+                    tradegateSections
+                } else {
+                    yahooSection
+                }
+
+                // Quantity
                 Section {
-                    TextField(priceSource == .tradegate ? "Ticker / name (e.g. VOW3)" : "Ticker symbol (e.g. VOO, AAPL, BTC-USD)",
-                              text: $tickerSymbol)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.characters)
-
-                    if priceSource == .tradegate {
-                        TextField("ISIN (e.g. DE0007664039)", text: $isin)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.characters)
-                    }
-
                     HStack {
                         TextField("Number of shares", text: $quantityText)
                             .keyboardType(.decimalPad)
                         Text("shares")
                             .foregroundStyle(.secondary)
-                    }
-                } footer: {
-                    if priceSource == .tradegate {
-                        Text("Prices fetched from Tradegate Exchange in EUR. Requires a valid ISIN.")
-                    } else {
-                        Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
                     }
                 }
             }
@@ -600,13 +607,148 @@ struct AddHoldingView: View {
         }
         .onAppear {
             if let existing {
-                priceSource   = existing.priceSource
-                tickerSymbol  = existing.tickerSymbol
-                isin          = existing.isin
-                quantityText  = existing.quantity.formatted()
+                priceSource  = existing.priceSource
+                tickerSymbol = existing.tickerSymbol
+                isin         = existing.isin
+                quantityText = existing.quantity.formatted()
             }
         }
     }
+
+    // MARK: - Yahoo Finance section
+
+    private var yahooSection: some View {
+        Section {
+            TextField("Ticker symbol (e.g. VOO, AAPL, BTC-USD)", text: $tickerSymbol)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
+        } footer: {
+            Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
+        }
+    }
+
+    // MARK: - Tradegate sections
+
+    @ViewBuilder
+    private var tradegateSections: some View {
+        // Search
+        Section {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search by name or ticker…", text: $searchQuery)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onChange(of: searchQuery) { _, newValue in
+                        scheduleSearch(query: newValue)
+                    }
+                if isSearching {
+                    ProgressView().scaleEffect(0.8)
+                }
+            }
+        } header: {
+            Text("Search")
+        } footer: {
+            if finnhubApiKey.isEmpty {
+                Label("Add a Finnhub API key in Settings to enable search.", systemImage: "info.circle")
+                    .font(.caption)
+            } else if let error = searchError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+
+        // Search results
+        if !searchResults.isEmpty {
+            Section("Results") {
+                ForEach(searchResults) { result in
+                    Button { selectResult(result) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.description)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Text("\(result.displaySymbol) · \(result.type)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+
+        // Resolved details (shown once ticker is set)
+        Section {
+            HStack {
+                TextField("Ticker / name (e.g. VOW3)", text: $tickerSymbol)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.characters)
+            }
+            HStack {
+                TextField("ISIN (e.g. DE0007664039)", text: $isin)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.characters)
+                if isinLoading {
+                    ProgressView().scaleEffect(0.8)
+                }
+            }
+        } header: {
+            Text("Details")
+        } footer: {
+            Text("Prices fetched from Tradegate Exchange in EUR.")
+        }
+    }
+
+    // MARK: - Search logic
+
+    private func scheduleSearch(query: String) {
+        searchTask?.cancel()
+        searchError = nil
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            searchResults = []
+            return
+        }
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await performSearch(query: query)
+        }
+    }
+
+    @MainActor
+    private func performSearch(query: String) async {
+        guard !finnhubApiKey.isEmpty else { return }
+        isSearching = true
+        defer { isSearching = false }
+        do {
+            searchResults = try await lookupService.search(query: query, apiKey: finnhubApiKey)
+        } catch {
+            searchError = "Search failed: \(error.localizedDescription)"
+            searchResults = []
+        }
+    }
+
+    @MainActor
+    private func selectResult(_ result: StockSearchResult) {
+        tickerSymbol  = result.displaySymbol
+        searchQuery   = result.description
+        searchResults = []
+
+        isinLoading = true
+        Task {
+            defer { isinLoading = false }
+            do {
+                if let resolved = try await lookupService.isin(for: result.symbol, apiKey: finnhubApiKey) {
+                    isin = resolved
+                }
+            } catch {
+                searchError = "Could not fetch ISIN: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - Save
 
     private func saveHolding() {
         guard let qty = parsedQuantity else { return }

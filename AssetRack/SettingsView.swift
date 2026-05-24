@@ -6,6 +6,8 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var currency: CurrencyService
 
+    @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
+
     // Export
     @State private var exportURL: URL?
     @State private var exportError: String?
@@ -53,6 +55,22 @@ struct SettingsView: View {
                         Task { await currency.fetch() }
                     }
                     .disabled(currency.isLoading)
+                }
+
+                // MARK: Integrations
+                Section {
+                    HStack {
+                        Text("Finnhub API Key")
+                        Spacer()
+                        SecureField("Paste key here", text: $finnhubApiKey)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+                } header: {
+                    Text("Integrations")
+                } footer: {
+                    Text("Used to search securities and auto-fill ISINs when adding Tradegate holdings. Get a free key at finnhub.io.")
                 }
 
                 // MARK: Data
