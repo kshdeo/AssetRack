@@ -540,11 +540,10 @@ struct AddHoldingView: View {
     @State private var isin: String = ""
     @State private var quantityText: String = ""
 
-    // Tradegate search
+    // Search (Tradegate + Yahoo Finance)
     @State private var searchQuery: String = ""
     @State private var searchResults: [StockSearchResult] = []
     @State private var isSearching = false
-    @State private var isinLoading = false
     @State private var searchError: String?
     @State private var searchTask: Task<Void, Never>?
 
@@ -649,10 +648,7 @@ struct AddHoldingView: View {
         } header: {
             Text("Search")
         } footer: {
-            if finnhubApiKey.isEmpty {
-                Label("Add a Finnhub API key in Settings to enable search.", systemImage: "info.circle")
-                    .font(.caption)
-            } else if let error = searchError {
+            if let error = searchError {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -685,14 +681,9 @@ struct AddHoldingView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.characters)
             }
-            HStack {
-                TextField("ISIN (e.g. DE0007664039)", text: $isin)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.characters)
-                if isinLoading {
-                    ProgressView().scaleEffect(0.8)
-                }
-            }
+            TextField("ISIN (e.g. DE0007664039)", text: $isin)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
         } header: {
             Text("Details")
         } footer: {
@@ -718,11 +709,17 @@ struct AddHoldingView: View {
 
     @MainActor
     private func performSearch(query: String) async {
-        guard !finnhubApiKey.isEmpty else { return }
         isSearching = true
         defer { isSearching = false }
         do {
-            searchResults = try await lookupService.search(query: query, apiKey: finnhubApiKey)
+            switch priceSource {
+            case .tradegate:
+                // Tradegate HTML search — returns ISINs directly, no API key needed
+                searchResults = try await lookupService.searchTradegate(query: query)
+            case .yahooFinance:
+                let key = ISINLookupService.effectiveApiKey(userKey: finnhubApiKey)
+                searchResults = try await lookupService.search(query: query, apiKey: key)
+            }
         } catch {
             searchError = "Search failed: \(error.localizedDescription)"
             searchResults = []
@@ -731,20 +728,13 @@ struct AddHoldingView: View {
 
     @MainActor
     private func selectResult(_ result: StockSearchResult) {
-        tickerSymbol  = result.displaySymbol
+        // For Tradegate results resolvedISIN is always set — fill it immediately, no second call needed.
+        // For Yahoo Finance results we only need the ticker symbol; ISIN is not required.
+        tickerSymbol  = result.description  // use company name as the display label
         searchQuery   = result.description
         searchResults = []
-
-        isinLoading = true
-        Task {
-            defer { isinLoading = false }
-            do {
-                if let resolved = try await lookupService.isin(for: result.symbol, apiKey: finnhubApiKey) {
-                    isin = resolved
-                }
-            } catch {
-                searchError = "Could not fetch ISIN: \(error.localizedDescription)"
-            }
+        if let resolvedISIN = result.resolvedISIN {
+            isin = resolvedISIN
         }
     }
 
