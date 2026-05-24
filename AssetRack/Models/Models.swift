@@ -62,6 +62,20 @@ enum AccountCategory: String, CaseIterable {
     case liabilities   = "Liabilities"
 }
 
+// MARK: - Price Source
+
+enum PriceSource: String, Codable, CaseIterable {
+    case yahooFinance = "yahooFinance"
+    case tradegate    = "tradegate"
+
+    var displayName: String {
+        switch self {
+        case .yahooFinance: return "Yahoo Finance"
+        case .tradegate:    return "Tradegate"
+        }
+    }
+}
+
 // MARK: - Holding
 
 @Model
@@ -73,15 +87,26 @@ final class Holding {
     var lastPrice: Double = 0.0
     var priceCurrency: String = "USD"
     var lastPriceFetchedAt: Date? = nil
+    /// Identifies the data source used to fetch this holding's price.
+    var priceSourceRaw: String = PriceSource.yahooFinance.rawValue
+    /// ISIN used when priceSource == .tradegate (e.g. "DE0007664039").
+    var isin: String = ""
 
     var value: Double { lastPrice * quantity }
 
-    init(tickerSymbol: String, quantity: Double) {
+    var priceSource: PriceSource {
+        get { PriceSource(rawValue: priceSourceRaw) ?? .yahooFinance }
+        set { priceSourceRaw = newValue.rawValue }
+    }
+
+    init(tickerSymbol: String, quantity: Double, priceSource: PriceSource = .yahooFinance, isin: String = "") {
         self.id = UUID()
         self.tickerSymbol = tickerSymbol.uppercased().trimmingCharacters(in: .whitespaces)
         self.quantity = quantity
         self.lastPrice = 0.0
         self.name = ""
+        self.priceSourceRaw = priceSource.rawValue
+        self.isin = isin
     }
 }
 

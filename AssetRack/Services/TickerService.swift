@@ -41,35 +41,44 @@ final class TickerService {
         errors = [:]
         defer { isLoading = false }
 
-        let symbols = Array(Set(allHoldings.map { $0.tickerSymbol }))
-        let joined = symbols.joined(separator: ",")
-        print("[TickerService] Fetching prices for: \(joined)")
+        let yahooHoldings     = allHoldings.filter { $0.priceSource == .yahooFinance }
+        let tradegateHoldings = allHoldings.filter { $0.priceSource == .tradegate }
 
         do {
-            let prices = try await fetchPrices(symbols: joined)
-            print("[TickerService] Got \(prices.count) prices: \(prices.mapValues { "\($0.price) \($0.currency)" })")
-
-            let fetchedAt = Date()
-            for account in accounts where account.type.supportsHoldings {
-                for holding in account.holdings {
+            // Fetch Yahoo Finance prices (batched)
+            if !yahooHoldings.isEmpty {
+                let symbols = Array(Set(yahooHoldings.map { $0.tickerSymbol }))
+                let joined = symbols.joined(separator: ",")
+                print("[TickerService] Yahoo Finance: fetching \(joined)")
+                let prices = try await fetchYahooPrices(symbols: joined)
+                print("[TickerService] Yahoo Finance: got \(prices.count) prices")
+                let fetchedAt = Date()
+                for holding in yahooHoldings {
                     if let result = prices[holding.tickerSymbol] {
-                        print("[TickerService] \(holding.tickerSymbol): \(result.price) \(result.currency)")
                         holding.lastPrice = result.price
                         holding.priceCurrency = result.currency
                         holding.lastPriceFetchedAt = fetchedAt
+                        print("[TickerService] \(holding.tickerSymbol): \(result.price) \(result.currency)")
                     } else {
-                        print("[TickerService] \(holding.tickerSymbol): no price in response")
+                        print("[TickerService] \(holding.tickerSymbol): no price in Yahoo response")
                         errors[holding.tickerSymbol] = "Price unavailable"
                     }
                 }
+            }
+
+            // Fetch Tradegate prices (concurrent, one request per ISIN)
+            if !tradegateHoldings.isEmpty {
+                print("[TickerService] Tradegate: fetching \(tradegateHoldings.count) holding(s)")
+                await fetchTradegatePrices(tradegateHoldings)
+            }
+
+            // Recompute balances and record snapshots for all brokerage accounts
+            for account in accounts where account.type.supportsHoldings {
                 let oldBalance = account.currentBalance
                 account.recomputeBalance(convert: currency.convert)
-
                 if abs(account.currentBalance - oldBalance) > 0.01 {
-                    let snap = BalanceSnapshot(balance: account.currentBalance)
-                    // SwiftData auto-inserts snap via the @Relationship cascade;
-                    // calling context.insert() explicitly would cause duplicate registration.
-                    account.balanceHistory.append(snap)
+                    // SwiftData auto-inserts via @Relationship — no explicit insert needed
+                    account.balanceHistory.append(BalanceSnapshot(balance: account.currentBalance))
                     account.updatedAt = Date()
                 }
             }
@@ -82,11 +91,51 @@ final class TickerService {
             // Task was cancelled (e.g. refreshable gesture released) — not a real failure
             print("[TickerService] Fetch cancelled")
         } catch {
-            print("[TickerService] Fetch failed: \(error)")
-            for symbol in symbols {
-                errors[symbol] = "Could not fetch price"
+            print("[TickerService] Yahoo Finance fetch failed: \(error)")
+            for holding in yahooHoldings {
+                errors[holding.tickerSymbol] = "Could not fetch price"
             }
         }
+    }
+
+    // MARK: - Tradegate
+
+    private func fetchTradegatePrices(_ holdings: [Holding]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for holding in holdings {
+                group.addTask {
+                    guard !holding.isin.isEmpty else {
+                        print("[TickerService] \(holding.tickerSymbol): no ISIN — skipping Tradegate fetch")
+                        return
+                    }
+                    do {
+                        let price = try await self.fetchTradegatePrice(isin: holding.isin)
+                        await MainActor.run {
+                            holding.lastPrice = price
+                            holding.priceCurrency = "EUR"
+                            holding.lastPriceFetchedAt = Date()
+                        }
+                        print("[TickerService] Tradegate \(holding.tickerSymbol) (\(holding.isin)): \(price) EUR")
+                    } catch {
+                        await MainActor.run {
+                            self.errors[holding.tickerSymbol] = "Could not fetch Tradegate price"
+                        }
+                        print("[TickerService] Tradegate \(holding.tickerSymbol): \(error)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func fetchTradegatePrice(isin: String) async throws -> Double {
+        let url = URL(string: "https://www.tradegatebsx.com/refresh.php?isin=\(isin)")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let quote = try JSONDecoder().decode(TradegateQuote.self, from: data)
+        guard quote.lastPrice > 0 else { throw URLError(.cannotParseResponse) }
+        return quote.lastPrice
     }
 
     // MARK: - Private
@@ -118,7 +167,7 @@ final class TickerService {
         return crumbString
     }
 
-    private func fetchPrices(symbols: String) async throws -> [String: (price: Double, currency: String)] {
+    private func fetchYahooPrices(symbols: String) async throws -> [String: (price: Double, currency: String)] {
         if crumb == nil { crumb = try await fetchCrumb() }
         print("[TickerService] Using crumb: '\(crumb ?? "nil")'")
 
@@ -148,7 +197,7 @@ final class TickerService {
             let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? 0
             print("[TickerService] Retry status: \(retryStatus)")
             guard retryStatus == 200 else { throw URLError(.badServerResponse) }
-            return try parseQuotes(from: retryData)
+            return try parseYahooQuotes(from: retryData)
         }
 
         guard statusCode == 200 else {
@@ -158,10 +207,10 @@ final class TickerService {
             throw URLError(.badServerResponse)
         }
 
-        return try parseQuotes(from: data)
+        return try parseYahooQuotes(from: data)
     }
 
-    private func parseQuotes(from data: Data) throws -> [String: (price: Double, currency: String)] {
+    private func parseYahooQuotes(from data: Data) throws -> [String: (price: Double, currency: String)] {
         do {
             let decoded = try JSONDecoder().decode(YahooQuoteResponse.self, from: data)
             var result: [String: (price: Double, currency: String)] = [:]
@@ -182,6 +231,25 @@ final class TickerService {
 }
 
 // MARK: - Response models
+
+/// Tradegate `refresh.php` response.
+/// The `last` field uses German comma-decimal notation (e.g. "360,70") in some responses
+/// and a plain Double in others — handled via custom decoding.
+private struct TradegateQuote: Decodable {
+    let lastPrice: Double
+
+    enum CodingKeys: String, CodingKey { case last }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let price = try? c.decode(Double.self, forKey: .last) {
+            lastPrice = price
+        } else {
+            let str = try c.decode(String.self, forKey: .last)
+            lastPrice = Double(str.replacingOccurrences(of: ",", with: ".")) ?? 0
+        }
+    }
+}
 
 private struct YahooQuoteResponse: Decodable {
     let quoteResponse: QuoteResponse

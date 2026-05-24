@@ -28,6 +28,8 @@ struct AddEditAccountView: View {
         var id = UUID()
         var tickerSymbol: String
         var quantity: Double
+        var priceSource: PriceSource = .yahooFinance
+        var isin: String = ""
         // Holds reference to persisted Holding when editing existing account
         var existingHolding: Holding?
     }
@@ -360,7 +362,8 @@ struct AddEditAccountView: View {
         if account.type.supportsHoldings {
             cashBalanceText = account.cashBalance > 0 ? String(format: "%.2f", account.cashBalance) : ""
             holdings = account.holdings.map {
-                HoldingDraft(tickerSymbol: $0.tickerSymbol, quantity: $0.quantity, existingHolding: $0)
+                HoldingDraft(tickerSymbol: $0.tickerSymbol, quantity: $0.quantity,
+                             priceSource: $0.priceSource, isin: $0.isin, existingHolding: $0)
             }
         } else {
             balanceText = String(format: "%.2f", account.currentBalance)
@@ -400,7 +403,8 @@ struct AddEditAccountView: View {
             if selectedType.supportsHoldings {
                 for draft in holdings {
                     // account is in context — appending auto-inserts the Holding
-                    account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity))
+                    account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity,
+                                                    priceSource: draft.priceSource, isin: draft.isin))
                 }
                 account.cashBalance = parsedCashBalance
                 account.recomputeBalance()
@@ -428,6 +432,8 @@ struct AddEditAccountView: View {
             if let existing = draft.existingHolding {
                 existing.tickerSymbol = draft.tickerSymbol
                 existing.quantity = draft.quantity
+                existing.priceSource = draft.priceSource
+                existing.isin = draft.isin
             } else {
                 // account is already in context — appending auto-inserts the Holding
                 account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity))
@@ -456,8 +462,18 @@ struct HoldingDraftRow: View {
     var body: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(draft.tickerSymbol.uppercased())
-                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text(draft.tickerSymbol.uppercased())
+                        .font(.subheadline.weight(.semibold))
+                    if draft.priceSource == .tradegate {
+                        Text("TG")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.orange, in: RoundedRectangle(cornerRadius: 3))
+                    }
+                }
                 if let existing = draft.existingHolding, existing.lastPrice > 0 {
                     Text("\(draft.quantity.formatted()) @ \(existing.lastPrice.currencyFormatted(code: existing.priceCurrency))")
                         .font(.caption)
@@ -518,21 +534,43 @@ struct AddHoldingView: View {
     var existing: AddEditAccountView.HoldingDraft?
     var onSave: (AddEditAccountView.HoldingDraft) -> Void
 
+    @State private var priceSource: PriceSource = .yahooFinance
     @State private var tickerSymbol: String = ""
+    @State private var isin: String = ""
     @State private var quantityText: String = ""
 
     private var parsedQuantity: Double? { Double(quantityText) }
     private var canSave: Bool {
-        !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty && parsedQuantity != nil
+        guard parsedQuantity != nil,
+              !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        if priceSource == .tradegate {
+            return !isin.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return true
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Ticker symbol (e.g. VOO, AAPL, BTC-USD)", text: $tickerSymbol)
+                    Picker("Price source", selection: $priceSource) {
+                        ForEach(PriceSource.allCases, id: \.self) { source in
+                            Text(source.displayName).tag(source)
+                        }
+                    }
+                }
+
+                Section {
+                    TextField(priceSource == .tradegate ? "Ticker / name (e.g. VOW3)" : "Ticker symbol (e.g. VOO, AAPL, BTC-USD)",
+                              text: $tickerSymbol)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.characters)
+
+                    if priceSource == .tradegate {
+                        TextField("ISIN (e.g. DE0007664039)", text: $isin)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.characters)
+                    }
 
                     HStack {
                         TextField("Number of shares", text: $quantityText)
@@ -541,7 +579,11 @@ struct AddHoldingView: View {
                             .foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
+                    if priceSource == .tradegate {
+                        Text("Prices fetched from Tradegate Exchange in EUR. Requires a valid ISIN.")
+                    } else {
+                        Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
+                    }
                 }
             }
             .navigationTitle(existing == nil ? "Add Holding" : "Edit Holding")
@@ -558,8 +600,10 @@ struct AddHoldingView: View {
         }
         .onAppear {
             if let existing {
-                tickerSymbol = existing.tickerSymbol
-                quantityText = existing.quantity.formatted()
+                priceSource   = existing.priceSource
+                tickerSymbol  = existing.tickerSymbol
+                isin          = existing.isin
+                quantityText  = existing.quantity.formatted()
             }
         }
     }
@@ -570,6 +614,8 @@ struct AddHoldingView: View {
             id: existing?.id ?? UUID(),
             tickerSymbol: tickerSymbol.uppercased().trimmingCharacters(in: .whitespaces),
             quantity: qty,
+            priceSource: priceSource,
+            isin: isin.uppercased().trimmingCharacters(in: .whitespaces),
             existingHolding: existing?.existingHolding
         )
         onSave(draft)
