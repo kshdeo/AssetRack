@@ -651,7 +651,7 @@ struct AddHoldingView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Search by name or ticker…", text: $searchQuery)
+                TextField(priceSource == .tradegate ? "Search by ISIN or name…" : "Search by name or ticker…", text: $searchQuery)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onChange(of: searchQuery) { _, newValue in

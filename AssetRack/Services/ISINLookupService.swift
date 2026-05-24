@@ -54,12 +54,24 @@ struct ISINLookupService {
         return parseTradegatResults(from: html)
     }
 
+    /// Strip HTML tags and decode common HTML entities from a raw HTML snippet.
+    private func stripHTMLTags(_ raw: String) -> String {
+        let stripped = raw.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        return stripped
+            .replacingOccurrences(of: "&amp;",  with: "&")
+            .replacingOccurrences(of: "&lt;",   with: "<")
+            .replacingOccurrences(of: "&gt;",   with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func parseTradegatResults(from html: String) -> [StockSearchResult] {
         // ── Case 1: multi-result search page
-        // Links look like: href="orderbuch.php?lang=en&amp;isin=DE0007664039">Volkswagen AG</a>
-        // Note: it's "orderbuch.php" (German), parameters may appear in any order,
-        // and the ISIN separator is "&amp;" in HTML.
-        let linkPattern = #"href="/?orderbuch\.php\?[^"]*isin=([A-Z]{2}[A-Z0-9]{10})[^"]*">([^<]{3,})</a>"#
+        // Links look like:
+        //   href="orderbuch.php?lang=en&isin=IE00BFMXXD54"><b>Vanguard</b> S&amp;P 500 UCITS ETF</a>
+        // The name may contain inline HTML tags (e.g. <b>…</b>) so we capture lazily
+        // with .+? and strip tags afterwards.
+        let linkPattern = #"href="/?orderbuch\.php\?[^"]*isin=([A-Z]{2}[A-Z0-9]{10})[^"]*">(.+?)</a>"#
         if let regex = try? NSRegularExpression(pattern: linkPattern) {
             let nsHtml = html as NSString
             let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
@@ -68,9 +80,9 @@ struct ISINLookupService {
             for match in matches {
                 guard match.numberOfRanges >= 3 else { continue }
                 let isin = nsHtml.substring(with: match.range(at: 1))
-                let name = nsHtml.substring(with: match.range(at: 2))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !seen.contains(isin), !name.isEmpty else { continue }
+                let rawName = nsHtml.substring(with: match.range(at: 2))
+                let name = stripHTMLTags(rawName)
+                guard !seen.contains(isin), name.count >= 3 else { continue }
                 seen.insert(isin)
                 results.append(StockSearchResult(
                     symbol: isin,
