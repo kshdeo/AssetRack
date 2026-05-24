@@ -668,6 +668,11 @@ struct AddHoldingView: View {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
+            } else if !isSearching && searchResults.isEmpty
+                        && !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text("No matching results")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
 
