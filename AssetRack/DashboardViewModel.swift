@@ -186,15 +186,27 @@ final class DashboardViewModel {
         }
     }
 
-    // MARK: - Month-over-month delta (derived from stacked data)
+    // MARK: - Period deltas (derived from stacked data)
+
+    func weekOverWeekDelta(from stackedData: [StackedDataPoint]) -> Double? {
+        periodDelta(from: stackedData, by: .day, value: -7)
+    }
 
     func monthOverMonthDelta(from stackedData: [StackedDataPoint]) -> Double? {
+        periodDelta(from: stackedData, by: .month, value: -1)
+    }
+
+    func yearOverYearDelta(from stackedData: [StackedDataPoint]) -> Double? {
+        periodDelta(from: stackedData, by: .year, value: -1)
+    }
+
+    private func periodDelta(from stackedData: [StackedDataPoint], by component: Calendar.Component, value: Int) -> Double? {
         let dates = Array(Set(stackedData.map { $0.date })).sorted()
         guard let lastDate = dates.last else { return nil }
 
-        let oneMonthAgo = Calendar.current.date(byAdding: .month, value: -1, to: lastDate)!
+        let anchor = Calendar.current.date(byAdding: component, value: value, to: lastDate)!
         guard let prevDate = dates.min(by: {
-            abs($0.timeIntervalSince(oneMonthAgo)) < abs($1.timeIntervalSince(oneMonthAgo))
+            abs($0.timeIntervalSince(anchor)) < abs($1.timeIntervalSince(anchor))
         }), prevDate != lastDate else { return nil }
 
         let prev = stackedData.filter { $0.date == prevDate }.map { $0.value }.reduce(0, +)

@@ -29,7 +29,9 @@ struct DashboardView: View {
                         netWorth: netWorth.amount,
                         totalAssets: totalAssets.amount,
                         totalLiabilities: totalLiabilities.amount,
-                        delta: vm.monthOverMonthDelta(from: stackedData),
+                        weekDelta: vm.weekOverWeekDelta(from: stackedData),
+                        monthDelta: vm.monthOverMonthDelta(from: stackedData),
+                        yearDelta: vm.yearOverYearDelta(from: stackedData),
                         currencyService: currencyService
                     )
 
@@ -118,13 +120,31 @@ extension DashboardView {
     }
 }
 
+// MARK: - Delta Badge
+
+private struct DeltaBadge: View {
+    let delta: Double
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
+            Text("\(abs(delta), format: .percent.precision(.fractionLength(1))) \(label)")
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(delta >= 0 ? Color.green : Color.red)
+    }
+}
+
 // MARK: - Hero Card
 
 struct NetWorthHeroCard: View {
     let netWorth: Double
     let totalAssets: Double
     let totalLiabilities: Double
-    let delta: Double?
+    let weekDelta: Double?
+    let monthDelta: Double?
+    let yearDelta: Double?
     let currencyService: CurrencyService
 
     var body: some View {
@@ -138,13 +158,18 @@ struct NetWorthHeroCard: View {
                 .contentTransition(.numericText())
                 .animation(.spring(duration: 0.4), value: netWorth)
 
-            if let delta {
-                HStack(spacing: 4) {
-                    Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
-                    Text("\(abs(delta), format: .percent.precision(.fractionLength(1))) vs last month")
+            if weekDelta != nil || monthDelta != nil || yearDelta != nil {
+                HStack(spacing: 12) {
+                    if let delta = weekDelta {
+                        DeltaBadge(delta: delta, label: "w/w")
+                    }
+                    if let delta = monthDelta {
+                        DeltaBadge(delta: delta, label: "m/m")
+                    }
+                    if let delta = yearDelta {
+                        DeltaBadge(delta: delta, label: "y/y")
+                    }
                 }
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(delta >= 0 ? Color.green : Color.red)
             }
 
             Divider().padding(.vertical, 4)
