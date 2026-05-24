@@ -158,6 +158,57 @@ struct ISINLookupService {
         }
     }
 
+    // MARK: - Price preview
+
+    /// Fetch a live price for a holding before it is saved — used for symbol validation.
+    /// Yahoo Finance uses the v8 chart API (no crumb required).
+    /// Tradegate uses the refresh.php ISIN endpoint.
+    func previewPrice(symbol: String, source: PriceSource, isin: String) async throws -> (price: Double, currency: String) {
+        switch source {
+        case .tradegate:
+            guard !isin.isEmpty else { throw PreviewError.missingIdentifier }
+            let price = try await fetchTradegatePrice(isin: isin)
+            return (price, "EUR")
+        case .yahooFinance:
+            guard !symbol.isEmpty else { throw PreviewError.missingIdentifier }
+            return try await fetchYahooPreviewPrice(symbol: symbol)
+        }
+    }
+
+    private func fetchTradegatePrice(isin: String) async throws -> Double {
+        let url = URL(string: "https://www.tradegatebsx.com/refresh.php?isin=\(isin)")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw PreviewError.symbolNotFound
+        }
+        let quote = try JSONDecoder().decode(TradegateQuote.self, from: data)
+        guard quote.lastPrice > 0 else { throw PreviewError.symbolNotFound }
+        return quote.lastPrice
+    }
+
+    private func fetchYahooPreviewPrice(symbol: String) async throws -> (price: Double, currency: String) {
+        let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
+        let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=1d&range=1d")!
+        var request = URLRequest(url: url)
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw PreviewError.symbolNotFound
+        }
+        let decoded = try JSONDecoder().decode(YahooChartResponse.self, from: data)
+        guard let meta = decoded.chart.result?.first?.meta,
+              let price = meta.regularMarketPrice, price > 0 else {
+            throw PreviewError.symbolNotFound
+        }
+        let currency = meta.currency ?? "USD"
+        // Normalise GBp / GBX (pence) → GBP
+        if currency == "GBp" || currency == "GBX" { return (price / 100.0, "GBP") }
+        return (price, currency)
+    }
+
     // MARK: - Errors
 
     enum LookupError: LocalizedError {
@@ -166,9 +217,48 @@ struct ISINLookupService {
             "No Finnhub API key configured. Add one in Settings."
         }
     }
+
+    enum PreviewError: LocalizedError {
+        case missingIdentifier
+        case symbolNotFound
+        var errorDescription: String? {
+            switch self {
+            case .missingIdentifier: return "Enter a ticker or ISIN first"
+            case .symbolNotFound:    return "Symbol not found"
+            }
+        }
+    }
 }
 
 // MARK: - Private response models
+
+private struct TradegateQuote: Decodable {
+    let lastPrice: Double
+    enum CodingKeys: String, CodingKey { case last }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let price = try? c.decode(Double.self, forKey: .last) {
+            lastPrice = price
+        } else {
+            let str = try c.decode(String.self, forKey: .last)
+            lastPrice = Double(str.replacingOccurrences(of: ",", with: ".")) ?? 0
+        }
+    }
+}
+
+private struct YahooChartResponse: Decodable {
+    let chart: Chart
+    struct Chart: Decodable {
+        let result: [Result]?
+        struct Result: Decodable {
+            let meta: Meta
+            struct Meta: Decodable {
+                let regularMarketPrice: Double?
+                let currency: String?
+            }
+        }
+    }
+}
 
 private struct FinnhubSearchResponse: Decodable {
     let result: [Symbol]

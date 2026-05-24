@@ -547,6 +547,12 @@ struct AddHoldingView: View {
     @State private var searchError: String?
     @State private var searchTask: Task<Void, Never>?
 
+    // Price preview
+    @State private var pricePreview: (price: Double, currency: String)?
+    @State private var isPriceFetching = false
+    @State private var pricePreviewError: String?
+    @State private var pricePreviewTask: Task<Void, Never>?
+
     private let lookupService = ISINLookupService()
 
     private var parsedQuantity: Double? { Double(quantityText) }
@@ -592,6 +598,15 @@ struct AddHoldingView: View {
                     }
                 }
             }
+            .onChange(of: tickerSymbol) { _, _ in
+                if priceSource == .yahooFinance { schedulePricePreview(debounce: true) }
+            }
+            .onChange(of: isin) { _, _ in
+                if priceSource == .tradegate { schedulePricePreview(debounce: false) }
+            }
+            .onChange(of: priceSource) { _, _ in
+                clearPricePreview()
+            }
             .navigationTitle(existing == nil ? "Add Holding" : "Edit Holding")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -621,6 +636,7 @@ struct AddHoldingView: View {
             TextField("Ticker symbol (e.g. VOO, AAPL, BTC-USD)", text: $tickerSymbol)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.characters)
+            pricePreviewRow
         } footer: {
             Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
         }
@@ -684,6 +700,7 @@ struct AddHoldingView: View {
             TextField("ISIN (e.g. DE0007664039)", text: $isin)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.characters)
+            pricePreviewRow
         } header: {
             Text("Details")
         } footer: {
@@ -720,6 +737,10 @@ struct AddHoldingView: View {
                 let key = ISINLookupService.effectiveApiKey(userKey: finnhubApiKey)
                 searchResults = try await lookupService.search(query: query, apiKey: key)
             }
+        } catch is CancellationError {
+            // A newer search superseded this one — not an error
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession was cancelled by task cancellation — not an error
         } catch {
             searchError = "Search failed: \(error.localizedDescription)"
             searchResults = []
@@ -738,6 +759,70 @@ struct AddHoldingView: View {
         if let resolvedISIN = result.resolvedISIN {
             isin = resolvedISIN
         }
+        schedulePricePreview(debounce: false)
+    }
+
+    // MARK: - Price preview
+
+    @ViewBuilder
+    private var pricePreviewRow: some View {
+        if isPriceFetching {
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.75)
+                Text("Fetching price…")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+        } else if let (price, currency) = pricePreview {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(price.currencyFormatted(code: currency, fractionDigits: 2))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+        } else if let error = pricePreviewError {
+            Label(error, systemImage: "exclamationmark.circle")
+                .font(.subheadline)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func schedulePricePreview(debounce: Bool) {
+        pricePreviewTask?.cancel()
+        clearPricePreview()
+        let symbol = tickerSymbol.trimmingCharacters(in: .whitespaces)
+        let currentISIN = isin.trimmingCharacters(in: .whitespaces)
+        guard (priceSource == .yahooFinance && !symbol.isEmpty) ||
+              (priceSource == .tradegate && currentISIN.count == 12) else { return }
+        pricePreviewTask = Task {
+            if debounce {
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
+            }
+            await fetchPricePreview()
+        }
+    }
+
+    @MainActor
+    private func fetchPricePreview() async {
+        isPriceFetching = true
+        defer { isPriceFetching = false }
+        do {
+            let result = try await lookupService.previewPrice(
+                symbol: tickerSymbol.uppercased().trimmingCharacters(in: .whitespaces),
+                source: priceSource,
+                isin: isin.trimmingCharacters(in: .whitespaces)
+            )
+            pricePreview = result
+        } catch {
+            pricePreviewError = error.localizedDescription
+        }
+    }
+
+    private func clearPricePreview() {
+        pricePreview = nil
+        pricePreviewError = nil
     }
 
     // MARK: - Save
