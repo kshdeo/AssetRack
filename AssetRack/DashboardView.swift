@@ -13,6 +13,7 @@ struct DashboardView: View {
     @State private var showingAllAccounts = false
     @State private var showingAddAccount = false
     @State private var showingSettings = false
+    @State private var showingProjection = false
     @State private var accountToEdit: Account?
 
     var body: some View {
@@ -44,6 +45,12 @@ struct DashboardView: View {
 
                     AllocationCard(segments: vm.allocationSegments(from: accounts, currency: currencyService))
 
+                    ProjectionTeaserCard(
+                        accounts: accounts,
+                        currencyService: currencyService,
+                        onTap: { showingProjection = true }
+                    )
+
                     AccountsCard(
                         accounts: vm.topAccounts(from: accounts),
                         totalCount: accounts.count,
@@ -72,6 +79,9 @@ struct DashboardView: View {
             .navigationTitle("Net Worth")
             .navigationDestination(isPresented: $showingAllAccounts) {
                 AccountsListView(currency: currencyService, ticker: ticker)
+            }
+            .navigationDestination(isPresented: $showingProjection) {
+                ProjectionView(currencyService: currencyService)
             }
             .task {
                 await currencyService.fetchIfNeeded()
@@ -576,6 +586,67 @@ struct AllocationCard: View {
         case "red":    return .red
         default:       return .gray
         }
+    }
+}
+
+// MARK: - Projection Teaser Card
+
+/// Compact teaser shown on the dashboard. Reuses `ProjectionViewModel` and the
+/// `.projectionData(...)` modifier so the dataKey / recalculate plumbing lives
+/// in one place — see CLAUDE.md rule #8.
+struct ProjectionTeaserCard: View {
+    @Query private var settingsList: [ProjectionSettings]
+    let accounts: [Account]
+    let currencyService: CurrencyService
+    let onTap: () -> Void
+
+    @State private var vm = ProjectionViewModel()
+
+    private var settings: ProjectionSettings? { settingsList.first }
+    private var horizon: Int { settings?.horizonYears ?? 10 }
+
+    var body: some View {
+        let delta = vm.endNetWorth - vm.startNetWorth
+
+        Button(action: onTap) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .foregroundStyle(.purple)
+                        Text("In \(horizon) years")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                    }
+                    Text(currencyService.formattedBase(vm.endNetWorth))
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if vm.startNetWorth > 0 || vm.endNetWorth > 0 {
+                        Text("\(delta >= 0 ? "Up" : "Down") \(currencyService.formattedBase(abs(delta))) from today")
+                            .font(.caption)
+                            .foregroundStyle(delta >= 0 ? .green : .red)
+                    } else {
+                        Text("Add accounts to see your trajectory")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .projectionData(
+            vm: vm,
+            accounts: accounts,
+            settings: settings,
+            horizonYears: horizon,
+            currencyService: currencyService
+        )
     }
 }
 

@@ -6,10 +6,10 @@ AssetRack is an iOS Net Worth Tracker — a personal finance app for tracking **
 **GitHub:** `git@github.com:kshdeo/AssetRack.git`
 
 ## Architecture
-- **Models** – `Account`, `Holding`, `BalanceSnapshot`, `NetWorthSnapshot` (`@Model`)
-- **Services** – `CurrencyService` (FX rates, currency arithmetic, formatting), `TickerService` (Yahoo Finance prices)
+- **Models** – `Account`, `Holding`, `BalanceSnapshot`, `NetWorthSnapshot`, `ProjectionSettings` (`@Model`)
+- **Services** – `CurrencyService` (FX rates, currency arithmetic, formatting), `TickerService` (Yahoo Finance + Tradegate prices), `ISINLookupService` (Finnhub + Tradegate search, live price preview), `ProjectionService` (pure-growth net worth projection)
 - **ViewModels** – `DashboardViewModel` (`@Observable`) computes chart/history data
-- **Views** – `DashboardView`, `AccountsListView`, `AccountRow`, `AddEditAccountView`, `AccountBalanceHistoryView`, `AddHistoricalEntryView`, `SettingsView`
+- **Views** – `DashboardView`, `AccountsListView`, `AccountRow`, `AddEditAccountView`, `AccountBalanceHistoryView`, `AddHistoricalEntryView`, `SettingsView`, `ProjectionView`
 - **Tests** – `CurrencyServiceTests` (20 tests, Swift Testing framework)
 
 ## Account Types
@@ -120,6 +120,56 @@ modelContext.recordNetWorthSnapshot(currency: currencyService, at: date)
 ```
 Never compute assets/liabilities manually outside this method.
 
+### 7. No heavy work in View `body`
+A View's `body` re-runs every time SwiftUI invalidates the view — frequently, and often without any real data change. Do **not** do any of the following inside `body`:
+
+- Build arrays or call services that compute them
+  ```swift
+  // ❌ wrong — runs every render
+  var body: some View {
+      let points = ProjectionService.project(...)
+      ...
+  }
+  ```
+- Trigger SwiftData side-effects (`modelContext.projectionSettings()`, `insert`, `save`)
+- Loop / reduce over `@Query` results to produce derived data
+- Instantiate models or service objects
+
+**Instead**, cache derived data in `@State` (or an `@Observable` ViewModel) and refresh it from lifecycle modifiers. Build a `dataKey` from the observed inputs and pass it to `.task(id:)` so the work runs only when an input actually changes:
+
+```swift
+@State private var vm = SomeViewModel()
+
+private var dataKey: Int {
+    var hasher = Hasher()
+    hasher.combine(horizonYears)
+    for account in accounts { hasher.combine(account.currentBalance) }
+    return hasher.finalize()
+}
+
+var body: some View {
+    SummaryCard(points: vm.points)
+        .task(id: dataKey) { vm.recalculate(...) }
+}
+```
+
+`body` reads already-computed state; it never produces it. SwiftData and Observation will trigger re-renders when any tracked field changes, and `.task(id:)` will refire the recalculation.
+
+### 8. Compose; don't duplicate
+When two views or services share logic — same hash, same pipeline, same lifecycle — extract it. Prefer, in roughly this order:
+
+- **Static helpers on a ViewModel / service** for pure functions
+  ```swift
+  // ✅ one source of truth
+  ProjectionViewModel.dataKey(accounts:settings:horizonYears:baseCurrency:)
+  ```
+  not the same `var dataKey: Int { var hasher = Hasher(); ... }` block copy-pasted into every view.
+- **Shared `@Observable` ViewModel** so each call site reads from the same computed state instead of recomputing it themselves.
+- **`ViewModifier`** when more than one view applies the same chain of lifecycle modifiers (`.onAppear { ... }.task(id: ...) { ... }`). Give it a name that states intent: `.projectionData(...)`, not `.commonStuff(...)`.
+- **Subview composition** — split a view into named subviews (`ProjectionSummaryCard`, `ProjectionChartCard`) and reuse those, instead of inlining the same `VStack { ... }.padding().background(...)` structure.
+
+Heuristic: if you find yourself copying ten lines from another file, **stop and factor**.
+
 ## Key Patterns
 
 ### CurrencyService API
@@ -154,6 +204,12 @@ func formattedBase(_ amount: Double) -> String
 3. `AccountBalanceHistoryView` — per-account snapshot list; tap to edit via `EditBalanceSnapshotView`
 4. `AddHistoricalEntryView` — bulk entry for all accounts on a selected past date; pre-fills with carry-forward balances
 
+### Net worth projection
+- `ProjectionSettings` (`@Model`, singleton) — per-category annual growth rates, liability paydown years, persisted horizon choice. Fetch/create via `modelContext.projectionSettings()`.
+- `ProjectionService.project(over:accounts:settings:currency:)` — pure function, returns `[ProjectionPoint]` at monthly granularity. Compound growth per asset category, linear paydown for liabilities. V1 = pure growth (no contributions, no inflation toggle).
+- `ProjectionView` — horizon picker (1/5/10/20/30y), summary card, stacked-area chart with net worth line, per-category breakdown, "Assumptions" sheet for editing rates.
+- Dashboard `ProjectionTeaserCard` shows the projected value at the saved horizon and navigates to the full view.
+
 ### Pull-to-refresh
 Wrapped in `Task { @MainActor in }` to avoid `-999 NSURLErrorDomain cancelled` from SwiftUI's cooperative cancellation propagating into URLSession.
 
@@ -171,9 +227,9 @@ Wrapped in `Task { @MainActor in }` to avoid `-999 NSURLErrorDomain cancelled` f
 - Background refresh via `BGAppRefreshTask`
 - Push notifications for large balance changes
 - Real estate value estimates (Redfin/Attom API)
+- **"In case of…" estate vault** — per-account important info (account number, portal URL, customer service phone, login username, joint owner, beneficiary, document location, free-form notes) plus an aggregate "Estate Vault" screen that can be exported to PDF and handed to a trusted contact. New `@Model AccountInfo` with 1:1 relationship to `Account`. V1 = per-account form + aggregate view; V2 = PDF export; V3 = optional CryptoKit field-level encryption gated behind biometric.
 
 ### Phase 3
-- Net worth projection model (configurable growth rates per asset class)
 - Debt payoff simulator (avalanche vs snowball)
 - Asset allocation targets + drift alerts
 - CSV / PDF export
