@@ -223,13 +223,34 @@ extension ModelContext {
 
 // MARK: - Formatting helpers
 
+// MARK: - Cached number formatters
+//
+// NumberFormatter instantiation costs ~1–2ms and `Double.currencyFormatted` is
+// called dozens of times per render across the app (ForEach rows × multiple
+// values per row). Caching by (code, fractionDigits) keeps tap-to-keyboard
+// hangs and scroll jank away — see CLAUDE.md "Performance" notes.
+private enum CurrencyFormatterCache {
+    private static let lock = NSLock()
+    private static var cache: [String: NumberFormatter] = [:]
+
+    static func formatter(code: String, fractionDigits: Int) -> NumberFormatter {
+        let key = "\(code)|\(fractionDigits)"
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = cache[key] { return existing }
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = code
+        f.minimumFractionDigits = fractionDigits
+        f.maximumFractionDigits = fractionDigits
+        cache[key] = f
+        return f
+    }
+}
+
 extension Double {
     func currencyFormatted(code: String = "USD", fractionDigits: Int = 0) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = code
-        formatter.minimumFractionDigits = fractionDigits
-        formatter.maximumFractionDigits = fractionDigits
+        let formatter = CurrencyFormatterCache.formatter(code: code, fractionDigits: fractionDigits)
         return formatter.string(from: NSNumber(value: self)) ?? "$0"
     }
 }

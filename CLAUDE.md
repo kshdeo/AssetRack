@@ -170,6 +170,13 @@ When two views or services share logic — same hash, same pipeline, same lifecy
 
 Heuristic: if you find yourself copying ten lines from another file, **stop and factor**.
 
+## Performance
+
+### Cache heavy `Foundation` objects
+`NumberFormatter`, `DateFormatter`, `ISO8601DateFormatter`, `JSONEncoder/Decoder` are all expensive to instantiate (~1–2ms each on modern devices) and are typically called many times per render across `ForEach` rows. Always cache them keyed by their configuration — see `CurrencyFormatterCache` in `Models.swift` for the pattern.
+
+Symptom of a missing cache: "Hang detected: 0.2s+" in the console when tapping a text field, scrolling a list, or first-rendering a screen with many formatted values. Always cache before adding a new formatter.
+
 ## UI conventions
 
 ### Card backgrounds
