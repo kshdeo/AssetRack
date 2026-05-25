@@ -261,7 +261,7 @@ struct ProjectionSummaryCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -313,7 +313,7 @@ struct ProjectionChartCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -337,7 +337,7 @@ struct ProjectionBreakdownCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func startValue(for category: AccountCategory) -> Double {

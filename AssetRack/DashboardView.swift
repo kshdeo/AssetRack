@@ -205,7 +205,7 @@ struct NetWorthHeroCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -334,7 +334,7 @@ struct NetWorthChartCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         .sheet(isPresented: $showingHistory) {
             NetWorthHistoryView(entries: historyEntries, currencyService: currencyService)
         }
@@ -574,7 +574,7 @@ struct AllocationCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func color(for name: String) -> Color {
@@ -637,7 +637,7 @@ struct ProjectionTeaserCard: View {
                     .foregroundStyle(.tertiary)
             }
             .padding()
-            .background(.background, in: RoundedRectangle(cornerRadius: 16))
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(.plain)
         .projectionData(
@@ -691,7 +691,7 @@ struct AccountsCard: View {
             }
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 

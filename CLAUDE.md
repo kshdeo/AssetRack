@@ -170,6 +170,21 @@ When two views or services share logic — same hash, same pipeline, same lifecy
 
 Heuristic: if you find yourself copying ten lines from another file, **stop and factor**.
 
+## UI conventions
+
+### Card backgrounds
+Screens use `Color(.systemGroupedBackground)`. Cards on top of those screens **must** use `Color(.secondarySystemGroupedBackground)`, not `.background` (which resolves to `systemBackground` = pure black in dark mode and disappears against the dark-gray screen).
+
+```swift
+// ✅ correct
+.background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+
+// ❌ wrong — invisible card in dark mode
+.background(.background, in: RoundedRectangle(cornerRadius: 16))
+```
+
+For a nested card (a card inside a card), step further to `tertiarySystemGroupedBackground`.
+
 ## Key Patterns
 
 ### CurrencyService API
