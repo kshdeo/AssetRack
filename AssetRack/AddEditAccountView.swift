@@ -30,6 +30,10 @@ struct AddEditAccountView: View {
         var quantity: Double
         var priceSource: PriceSource = .yahooFinance
         var isin: String = ""
+        /// Price fetched during the add/edit flow — used to pre-populate the holding
+        /// so the account balance is correct immediately, before the next TickerService refresh.
+        var lastPrice: Double = 0
+        var priceCurrency: String = "USD"
         // Holds reference to persisted Holding when editing existing account
         var existingHolding: Holding?
     }
@@ -69,7 +73,10 @@ struct AddEditAccountView: View {
     }
 
     private var hasPendingPrices: Bool {
-        holdings.contains { $0.existingHolding?.lastPrice == 0 || $0.existingHolding == nil }
+        holdings.contains { draft in
+            let price = draft.existingHolding?.lastPrice ?? draft.lastPrice
+            return price == 0
+        }
     }
 
     private var canSave: Bool {
@@ -108,7 +115,7 @@ struct AddEditAccountView: View {
                     }
                 }
             }
-            .navigationTitle(isEditing ? "Edit Account" : "Add Account")
+            .navigationTitle(isEditing ? (editingAccount?.name ?? "Edit Account") : "Add Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -403,8 +410,13 @@ struct AddEditAccountView: View {
             if selectedType.supportsHoldings {
                 for draft in holdings {
                     // account is in context — appending auto-inserts the Holding
-                    account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity,
-                                                    priceSource: draft.priceSource, isin: draft.isin))
+                    let h = Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity,
+                                    priceSource: draft.priceSource, isin: draft.isin)
+                    if draft.lastPrice > 0 {
+                        h.lastPrice = draft.lastPrice
+                        h.priceCurrency = draft.priceCurrency
+                    }
+                    account.holdings.append(h)
                 }
                 account.cashBalance = parsedCashBalance
                 account.recomputeBalance()
@@ -434,9 +446,19 @@ struct AddEditAccountView: View {
                 existing.quantity = draft.quantity
                 existing.priceSource = draft.priceSource
                 existing.isin = draft.isin
+                if draft.lastPrice > 0 {
+                    existing.lastPrice = draft.lastPrice
+                    existing.priceCurrency = draft.priceCurrency
+                }
             } else {
                 // account is already in context — appending auto-inserts the Holding
-                account.holdings.append(Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity))
+                let h = Holding(tickerSymbol: draft.tickerSymbol, quantity: draft.quantity,
+                                priceSource: draft.priceSource, isin: draft.isin)
+                if draft.lastPrice > 0 {
+                    h.lastPrice = draft.lastPrice
+                    h.priceCurrency = draft.priceCurrency
+                }
+                account.holdings.append(h)
             }
         }
     }
@@ -474,8 +496,10 @@ struct HoldingDraftRow: View {
                             .background(.orange, in: RoundedRectangle(cornerRadius: 3))
                     }
                 }
-                if let existing = draft.existingHolding, existing.lastPrice > 0 {
-                    Text("\(draft.quantity.formatted()) @ \(existing.lastPrice.currencyFormatted(code: existing.priceCurrency, fractionDigits: 2))")
+                let displayPrice    = draft.existingHolding?.lastPrice    ?? draft.lastPrice
+                let displayCurrency = draft.existingHolding?.priceCurrency ?? draft.priceCurrency
+                if displayPrice > 0 {
+                    Text("\(draft.quantity.formatted()) @ \(displayPrice.currencyFormatted(code: displayCurrency, fractionDigits: 2))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .contentTransition(.numericText())
@@ -488,6 +512,14 @@ struct HoldingDraftRow: View {
             Spacer()
             if let existing = draft.existingHolding {
                 HoldingPriceView(holding: existing)
+            } else if draft.lastPrice > 0 {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text((draft.lastPrice * draft.quantity).currencyFormatted(code: draft.priceCurrency, fractionDigits: 2))
+                        .font(.subheadline.weight(.semibold))
+                    Text("Preview price")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 Text("Price pending")
                     .font(.caption)
@@ -759,7 +791,9 @@ struct AddHoldingView: View {
         // For Yahoo Finance: displaySymbol is the proper ticker (e.g. "AAPL").
         let isRealTicker = result.displaySymbol != result.resolvedISIN
         tickerSymbol  = isRealTicker ? result.displaySymbol : result.description
-        searchQuery   = result.description
+        // Clear the search field — an empty query guards early in scheduleSearch,
+        // so this dismisses the results list without triggering a new search.
+        searchQuery   = ""
         searchResults = []
         if let resolvedISIN = result.resolvedISIN {
             isin = resolvedISIN
@@ -834,7 +868,7 @@ struct AddHoldingView: View {
 
     private func saveHolding() {
         guard let qty = parsedQuantity else { return }
-        let draft = AddEditAccountView.HoldingDraft(
+        var draft = AddEditAccountView.HoldingDraft(
             id: existing?.id ?? UUID(),
             tickerSymbol: tickerSymbol.uppercased().trimmingCharacters(in: .whitespaces),
             quantity: qty,
@@ -842,6 +876,11 @@ struct AddHoldingView: View {
             isin: isin.uppercased().trimmingCharacters(in: .whitespaces),
             existingHolding: existing?.existingHolding
         )
+        // Carry the previewed price so the account balance is correct immediately
+        if let preview = pricePreview {
+            draft.lastPrice = preview.price
+            draft.priceCurrency = preview.currency
+        }
         onSave(draft)
         dismiss()
     }
