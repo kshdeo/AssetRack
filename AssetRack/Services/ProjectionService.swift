@@ -21,10 +21,12 @@ struct ProjectionPoint: Identifiable {
 /// Pure-function projection math. No state, no I/O.
 struct ProjectionService {
 
-    /// Project the user's net worth at monthly granularity for `years` into the future,
-    /// using compound growth per asset category and linear paydown for liabilities.
+    /// Project the user's net worth at monthly granularity for `years` into the future.
+    /// Each asset category compounds on its starting balance plus the standard
+    /// annuity contribution stream. Liabilities pay down linearly toward zero.
     ///
-    /// V1: pure-growth model — no contributions, no withdrawals, no inflation adjustment.
+    /// V2 model: net monthly savings (income − expenses) flows into the Investments
+    /// category. Negative net flows out (drawdown / retiree scenario).
     static func project(
         over years: Int,
         accounts: [Account],
@@ -75,7 +77,16 @@ struct ProjectionService {
             for category in AccountCategory.allCases where category != .liabilities {
                 let start = startByCategory[category] ?? 0
                 let rate  = monthlyRate[category] ?? 0
-                assets[category] = start * pow(1 + rate, Double(month))
+                let contribution = monthlyContribution(for: category, settings: settings)
+                // FV = PV * (1+r)^t + PMT * ((1+r)^t − 1) / r
+                // For r = 0 the annuity term collapses to PMT * t (linear).
+                let growthFactor = pow(1 + rate, Double(month))
+                let pvGrowth = start * growthFactor
+                let pmtGrowth: Double = rate == 0
+                    ? contribution * Double(month)
+                    : contribution * (growthFactor - 1) / rate
+                // Floor at 0 — once a category drains, it can't go negative.
+                assets[category] = max(0, pvGrowth + pmtGrowth)
             }
 
             let liabilities = max(0, startingLiabilities - liabilityMonthlyPaydown * Double(month))
@@ -90,6 +101,16 @@ struct ProjectionService {
         }
 
         return points
+    }
+
+    /// Monthly contribution that flows into each category. V2 routes net savings
+    /// (income − expenses) into Investments only; pension and real estate can
+    /// get their own streams in a future iteration.
+    private static func monthlyContribution(for category: AccountCategory, settings: ProjectionSettings) -> Double {
+        switch category {
+        case .investments:                                   return settings.netMonthlySavings
+        case .cashAndBank, .pension, .realEstate, .liabilities: return 0
+        }
     }
 }
 

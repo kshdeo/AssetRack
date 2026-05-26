@@ -53,6 +53,8 @@ final class ProjectionViewModel {
             hasher.combine(s.pensionRate)
             hasher.combine(s.realEstateRate)
             hasher.combine(s.liabilityPaydownYears)
+            hasher.combine(s.monthlyIncome)
+            hasher.combine(s.monthlyExpenses)
         }
         hasher.combine(baseCurrency)
         return hasher.finalize()
@@ -142,6 +144,7 @@ struct ProjectionView: View {
                 ProjectionSummaryCard(
                     horizonYears: horizonYears,
                     points: vm.points,
+                    netMonthlySavings: settings?.netMonthlySavings ?? 0,
                     currencyService: currencyService
                 )
 
@@ -212,7 +215,15 @@ struct ProjectionView: View {
 struct ProjectionSummaryCard: View {
     let horizonYears: Int
     let points: [ProjectionPoint]
+    let netMonthlySavings: Double
     let currencyService: CurrencyService
+
+    private var cashFlowSubtitle: String {
+        let abs = currencyService.formattedBase(Swift.abs(netMonthlySavings))
+        return netMonthlySavings >= 0
+            ? "Assumes saving \(abs)/mo into investments"
+            : "Assumes drawing \(abs)/mo from investments"
+    }
 
     var body: some View {
         let endNetWorth = points.last?.netWorth ?? 0
@@ -237,6 +248,12 @@ struct ProjectionSummaryCard: View {
                 }
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(delta >= 0 ? Color.green : Color.red)
+            }
+
+            if netMonthlySavings != 0 {
+                Text(cashFlowSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Divider().padding(.vertical, 4)
@@ -400,6 +417,19 @@ struct ProjectionAssumptionsView: View {
                 }
 
                 Section {
+                    amountRow(title: "Monthly income",   amount: $settings.monthlyIncome)
+                    amountRow(title: "Monthly expenses", amount: $settings.monthlyExpenses)
+                    LabeledContent("Net savings") {
+                        Text(settings.netMonthlySavings, format: .currency(code: "USD"))
+                            .foregroundStyle(settings.netMonthlySavings >= 0 ? .green : .red)
+                    }
+                } header: {
+                    Text("Monthly cash flow")
+                } footer: {
+                    Text("Net savings (income − expenses) flow into investments each month. A negative net draws investments down — useful for retirement scenarios.")
+                }
+
+                Section {
                     Stepper(value: $settings.liabilityPaydownYears, in: 0...40) {
                         HStack {
                             Text("Pay off in")
@@ -438,6 +468,19 @@ struct ProjectionAssumptionsView: View {
                 .frame(width: 70)
             Text("%")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func amountRow(title: String, amount: Binding<Double>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField("0",
+                      value: amount,
+                      format: .number.precision(.fractionLength(0)))
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 100)
         }
     }
 }

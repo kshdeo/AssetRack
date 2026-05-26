@@ -16,6 +16,20 @@ final class ProjectionSettings {
     /// Years to amortise each liability toward zero (linear paydown, V1).
     var liabilityPaydownYears: Int = 5
 
+    // MARK: - Monthly cash flow (V2)
+    //
+    // Net of these (`income - expenses`) is treated as a monthly contribution to
+    // the Investments category. Negative net = drawdown (retiree scenario).
+
+    var monthlyIncome: Double   = 0
+    var monthlyExpenses: Double = 0
+
+    /// Monthly contribution that flows into investments. Positive when saving,
+    /// negative when drawing down.
+    var netMonthlySavings: Double {
+        monthlyIncome - monthlyExpenses
+    }
+
     /// Persisted UI choice so the user lands on their last horizon.
     var horizonYears: Int = 10
 

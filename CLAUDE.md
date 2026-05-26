@@ -227,9 +227,9 @@ func formattedBase(_ amount: Double) -> String
 4. `AddHistoricalEntryView` — bulk entry for all accounts on a selected past date; pre-fills with carry-forward balances
 
 ### Net worth projection
-- `ProjectionSettings` (`@Model`, singleton) — per-category annual growth rates, liability paydown years, persisted horizon choice. Fetch/create via `modelContext.projectionSettings()`.
-- `ProjectionService.project(over:accounts:settings:currency:)` — pure function, returns `[ProjectionPoint]` at monthly granularity. Compound growth per asset category, linear paydown for liabilities. V1 = pure growth (no contributions, no inflation toggle).
-- `ProjectionView` — horizon picker (1/5/10/20/30y), summary card, stacked-area chart with net worth line, per-category breakdown, "Assumptions" sheet for editing rates.
+- `ProjectionSettings` (`@Model`, singleton) — per-category annual growth rates, liability paydown years, monthly income & expenses, persisted horizon choice. Fetch/create via `modelContext.projectionSettings()`.
+- `ProjectionService.project(over:accounts:settings:currency:)` — pure function, returns `[ProjectionPoint]` at monthly granularity. Standard annuity formula per asset category: `FV = PV * (1+r)^t + PMT * ((1+r)^t − 1)/r`. V2 routes net monthly savings (income − expenses) into Investments as the PMT stream; negative net drains investments. Other categories pure-grow. Liabilities amortise linearly to zero. Values floor at 0.
+- `ProjectionView` — horizon picker (1/5/10/20/30y), summary card with cash-flow subtitle, stacked-area chart with net worth line, per-category breakdown, "Assumptions" sheet for editing rates and monthly cash flow.
 - Dashboard `ProjectionTeaserCard` shows the projected value at the saved horizon and navigates to the full view.
 
 ### Pull-to-refresh
