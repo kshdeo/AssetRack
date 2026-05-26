@@ -15,49 +15,135 @@ struct StackedDataPoint: Identifiable {
 
 // MARK: - ViewModel
 
+/// Holds all derived dashboard state. Views read these cached properties;
+/// `recalculate(...)` runs the pure-function pipeline and is wired via
+/// `.task(id: DashboardViewModel.dataKey(...))` so the heavy work only fires
+/// when an input actually changes — see CLAUDE.md rule #7.
 @Observable
 final class DashboardViewModel {
 
     // Category order for stacking (bottom → top)
     static let stackOrder: [AccountCategory] = [.cashAndBank, .investments, .pension, .realEstate]
 
+    // MARK: - Cached state
+
+    private(set) var netWorth: Money         = Money(0, "USD")
+    private(set) var totalAssets: Money      = Money(0, "USD")
+    private(set) var totalLiabilities: Money = Money(0, "USD")
+    private(set) var stackedData: [StackedDataPoint] = []
+    private(set) var historyEntries: [AccountHistoryEntry] = []
+    private(set) var allocationSegments: [AllocationSegment] = []
+    private(set) var topAccounts: [Account] = []
+
+    private(set) var todaysGain: TodaysGain?
+    private(set) var weekDelta: Double?
+    private(set) var monthDelta: Double?
+    private(set) var yearDelta: Double?
+
+    // MARK: - Recalculate
+
+    /// Pure-function pipeline. Call from `.task(id:)` only — never from `body`.
+    func recalculate(accounts: [Account], currency: CurrencyService) {
+        netWorth         = computeNetWorth(accounts: accounts, currency: currency)
+        totalAssets      = computeTotalAssets(accounts: accounts, currency: currency)
+        totalLiabilities = computeTotalLiabilities(accounts: accounts, currency: currency)
+        stackedData      = computeStackedHistoryData(accounts: accounts, currency: currency)
+        historyEntries   = computeAccountHistoryEntries(accounts: accounts, currency: currency)
+        allocationSegments = computeAllocationSegments(accounts: accounts, currency: currency)
+        topAccounts      = computeTopAccounts(accounts: accounts)
+        todaysGain       = computeTodaysGain(historyEntries: historyEntries)
+        weekDelta        = computePeriodDelta(stackedData: stackedData, by: .day, value: -7)
+        monthDelta       = computePeriodDelta(stackedData: stackedData, by: .month, value: -1)
+        yearDelta        = computePeriodDelta(stackedData: stackedData, by: .year, value: -1)
+    }
+
+    /// Single source of truth for the `.task(id:)` key — captures every input the
+    /// dashboard derives data from. Cheap to compute; the iteration only does
+    /// integer hash combines.
+    static func dataKey(accounts: [Account], currency: CurrencyService) -> Int {
+        var hasher = Hasher()
+        for account in accounts {
+            hasher.combine(account.id)
+            hasher.combine(account.currentBalance)
+            hasher.combine(account.currency)
+            hasher.combine(account.typeRaw)
+            hasher.combine(account.balanceHistory.count)
+            for snap in account.balanceHistory {
+                hasher.combine(snap.id)
+                hasher.combine(snap.balance)
+                hasher.combine(snap.recordedAt)
+            }
+        }
+        hasher.combine(currency.baseCurrency)
+        hasher.combine(currency.lastFetched)
+        return hasher.finalize()
+    }
+
+    // MARK: - Supporting types
+
+    struct TodaysGain {
+        let amount: Double
+        let percent: Double?
+    }
+
+    struct AllocationSegment: Identifiable {
+        var id: AccountCategory { category }
+        let category: AccountCategory
+        let value: Double        // share of total assets (0…1)
+        let color: String
+    }
+
+    struct AccountHistoryEntry: Identifiable {
+        let id = UUID()
+        let date: Date
+        let baseCurrency: String
+        let totalInBase: Double
+        let rows: [AccountRow]
+
+        struct AccountRow: Identifiable {
+            let id: UUID
+            let accountName: String
+            let isLiability: Bool
+            let currency: String
+            let balance: Double
+            let snapshot: BalanceSnapshot?
+            var isCarriedForward: Bool { snapshot == nil }
+        }
+    }
+
     // MARK: - Net worth (current)
 
-    func netWorth(from accounts: [Account], currency: CurrencyService) -> Money {
+    private func computeNetWorth(accounts: [Account], currency: CurrencyService) -> Money {
         currency.sum(accounts.map { Money($0.signedBalance, $0.currency) }, in: currency.baseCurrency)
     }
 
-    func totalAssets(from accounts: [Account], currency: CurrencyService) -> Money {
+    private func computeTotalAssets(accounts: [Account], currency: CurrencyService) -> Money {
         currency.sum(
             accounts.filter { !$0.isLiability }.map { Money($0.currentBalance, $0.currency) },
             in: currency.baseCurrency
         )
     }
 
-    func totalLiabilities(from accounts: [Account], currency: CurrencyService) -> Money {
+    private func computeTotalLiabilities(accounts: [Account], currency: CurrencyService) -> Money {
         currency.sum(
             accounts.filter { $0.isLiability }.map { Money($0.currentBalance, $0.currency) },
             in: currency.baseCurrency
         )
     }
 
-    // MARK: - Stacked history (derived from BalanceSnapshot)
+    // MARK: - Stacked history
 
-    /// Builds stacked area chart data from per-account BalanceSnapshot history.
-    /// Uses current FX rates for currency conversion.
-    func stackedHistoryData(from accounts: [Account], currency: CurrencyService) -> [StackedDataPoint] {
+    private func computeStackedHistoryData(accounts: [Account], currency: CurrencyService) -> [StackedDataPoint] {
         let calendar = Calendar.current
         let base = currency.baseCurrency
         let today = calendar.startOfDay(for: Date())
 
-        // Collect all unique calendar days from snapshots, always including today
         var daySet = Set(accounts.flatMap {
             $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
         })
         daySet.insert(today)
         let uniqueDays = daySet.sorted()
 
-        // Need at least one snapshot somewhere to draw history
         let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
         guard hasAnySnapshot else { return [] }
 
@@ -67,7 +153,6 @@ final class DashboardViewModel {
             var categoryTotals: [AccountCategory: Double] = [:]
 
             for account in accounts where !account.isLiability {
-                // For today use the live balance; for past days carry-forward from snapshots
                 let balance: Double
                 if day == today {
                     balance = account.currentBalance
@@ -83,7 +168,6 @@ final class DashboardViewModel {
                 categoryTotals[account.type.category, default: 0] += converted
             }
 
-            // Build stacked segments bottom-up
             var cumulative = 0.0
             for category in Self.stackOrder {
                 let value = categoryTotals[category] ?? 0
@@ -101,36 +185,13 @@ final class DashboardViewModel {
         return result
     }
 
-    // MARK: - Per-account history entries (for the list view)
+    // MARK: - Per-account history entries
 
-    struct AccountHistoryEntry: Identifiable {
-        let id = UUID()
-        let date: Date
-        let baseCurrency: String
-        let totalInBase: Double
-        /// All accounts with a known balance on or before this date.
-        let rows: [AccountRow]
-
-        struct AccountRow: Identifiable {
-            /// Account id — stable even for carried-forward rows.
-            let id: UUID
-            let accountName: String
-            let isLiability: Bool
-            let currency: String
-            let balance: Double
-            /// Non-nil only when there is a snapshot recorded on this exact calendar day.
-            /// Nil means the value is carried forward from a previous day (read-only).
-            let snapshot: BalanceSnapshot?
-            var isCarriedForward: Bool { snapshot == nil }
-        }
-    }
-
-    func accountHistoryEntries(from accounts: [Account], currency: CurrencyService) -> [AccountHistoryEntry] {
+    private func computeAccountHistoryEntries(accounts: [Account], currency: CurrencyService) -> [AccountHistoryEntry] {
         let calendar = Calendar.current
         let base = currency.baseCurrency
         let today = calendar.startOfDay(for: Date())
 
-        // Unique days from snapshots, always including today
         var daySet = Set(accounts.flatMap {
             $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
         })
@@ -149,16 +210,13 @@ final class DashboardViewModel {
                 let exact: BalanceSnapshot?
 
                 if day == today {
-                    // Always use live balance for today's entry
                     balance = account.currentBalance
-                    exact = nil   // today's synthetic entry is not directly editable
+                    exact = nil
                 } else {
-                    // Carry-forward: most recent snapshot on or before this day
                     guard let latest = account.balanceHistory
                         .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
                         .max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
                     balance = latest.balance
-                    // Exact snapshot for this day (editable)
                     exact = account.balanceHistory
                         .filter({ calendar.startOfDay(for: $0.recordedAt) == day })
                         .max(by: { $0.recordedAt < $1.recordedAt })
@@ -186,21 +244,22 @@ final class DashboardViewModel {
         }
     }
 
-    // MARK: - Period deltas (derived from stacked data)
+    // MARK: - Today's gain
 
-    func weekOverWeekDelta(from stackedData: [StackedDataPoint]) -> Double? {
-        periodDelta(from: stackedData, by: .day, value: -7)
+    private func computeTodaysGain(historyEntries: [AccountHistoryEntry]) -> TodaysGain? {
+        guard historyEntries.count >= 2 else { return nil }
+        // Entries come back in descending order — [0] is today's live row, [1]
+        // is the most recent prior snapshot.
+        let today    = historyEntries[0].totalInBase
+        let previous = historyEntries[1].totalInBase
+        let amount   = today - previous
+        let percent  = previous != 0 ? amount / abs(previous) : nil
+        return TodaysGain(amount: amount, percent: percent)
     }
 
-    func monthOverMonthDelta(from stackedData: [StackedDataPoint]) -> Double? {
-        periodDelta(from: stackedData, by: .month, value: -1)
-    }
+    // MARK: - Period deltas
 
-    func yearOverYearDelta(from stackedData: [StackedDataPoint]) -> Double? {
-        periodDelta(from: stackedData, by: .year, value: -1)
-    }
-
-    private func periodDelta(from stackedData: [StackedDataPoint], by component: Calendar.Component, value: Int) -> Double? {
+    private func computePeriodDelta(stackedData: [StackedDataPoint], by component: Calendar.Component, value: Int) -> Double? {
         let dates = Array(Set(stackedData.map { $0.date })).sorted()
         guard let lastDate = dates.last else { return nil }
 
@@ -217,7 +276,7 @@ final class DashboardViewModel {
 
     // MARK: - Allocation
 
-    func allocationSegments(from accounts: [Account], currency: CurrencyService) -> [(category: AccountCategory, value: Double, color: String)] {
+    private func computeAllocationSegments(accounts: [Account], currency: CurrencyService) -> [AllocationSegment] {
         let assets = accounts.filter { !$0.isLiability }
         let total = currency.sum(assets.map { Money($0.currentBalance, $0.currency) }, in: currency.baseCurrency).amount
         guard total > 0 else { return [] }
@@ -231,7 +290,7 @@ final class DashboardViewModel {
         }
 
         return grouped
-            .map { (category: $0.key, value: $0.value / total, color: colorName(for: $0.key)) }
+            .map { AllocationSegment(category: $0.key, value: $0.value / total, color: colorName(for: $0.key)) }
             .sorted { $0.value > $1.value }
     }
 
@@ -247,7 +306,7 @@ final class DashboardViewModel {
 
     // MARK: - Accounts list
 
-    func topAccounts(from accounts: [Account], limit: Int = 5) -> [Account] {
+    private func computeTopAccounts(accounts: [Account], limit: Int = 5) -> [Account] {
         accounts
             .sorted { abs($0.currentBalance) > abs($1.currentBalance) }
             .prefix(limit)

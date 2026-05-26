@@ -20,30 +20,30 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    let netWorth = vm.netWorth(from: accounts, currency: currencyService)
-                    let totalAssets = vm.totalAssets(from: accounts, currency: currencyService)
-                    let totalLiabilities = vm.totalLiabilities(from: accounts, currency: currencyService)
-                    let stackedData = vm.stackedHistoryData(from: accounts, currency: currencyService)
-                    let historyEntries = vm.accountHistoryEntries(from: accounts, currency: currencyService)
+                    VStack(spacing: 10) {
+                        NetWorthHeroCard(
+                            netWorth: vm.netWorth.amount,
+                            totalAssets: vm.totalAssets.amount,
+                            totalLiabilities: vm.totalLiabilities.amount,
+                            todaysGain: vm.todaysGain,
+                            currencyService: currencyService
+                        )
 
-                    NetWorthHeroCard(
-                        netWorth: netWorth.amount,
-                        totalAssets: totalAssets.amount,
-                        totalLiabilities: totalLiabilities.amount,
-                        weekDelta: vm.weekOverWeekDelta(from: stackedData),
-                        monthDelta: vm.monthOverMonthDelta(from: stackedData),
-                        yearDelta: vm.yearOverYearDelta(from: stackedData),
-                        currencyService: currencyService
-                    )
+                        TrendStrip(
+                            weekDelta: vm.weekDelta,
+                            monthDelta: vm.monthDelta,
+                            yearDelta: vm.yearDelta
+                        )
+                    }
 
                     NetWorthChartCard(
-                        stackedData: stackedData,
-                        historyEntries: historyEntries,
+                        stackedData: vm.stackedData,
+                        historyEntries: vm.historyEntries,
                         currencyService: currencyService,
                         selectedDate: $selectedDate
                     )
 
-                    AllocationCard(segments: vm.allocationSegments(from: accounts, currency: currencyService))
+                    AllocationCard(segments: vm.allocationSegments)
 
                     ProjectionTeaserCard(
                         accounts: accounts,
@@ -52,7 +52,7 @@ struct DashboardView: View {
                     )
 
                     AccountsCard(
-                        accounts: vm.topAccounts(from: accounts),
+                        accounts: vm.topAccounts,
                         totalCount: accounts.count,
                         currencyService: currencyService,
                         onSeeAll: { showingAllAccounts = true },
@@ -61,6 +61,9 @@ struct DashboardView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
+            }
+            .task(id: DashboardViewModel.dataKey(accounts: accounts, currency: currencyService)) {
+                vm.recalculate(accounts: accounts, currency: currencyService)
             }
             .refreshable {
                 // Wrap in an unstructured Task so the network requests are not
@@ -132,17 +135,47 @@ extension DashboardView {
 
 // MARK: - Delta Badge
 
+/// Small period-delta chip used in the TrendStrip. Intentionally muted — only
+/// the arrow carries the green/red signal; the text sits in `.secondary` so the
+/// strip doesn't compete for attention with the hero's "today" line.
 private struct DeltaBadge: View {
     let delta: Double
     let label: String
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
+        HStack(spacing: 4) {
+            Image(systemName: delta >= 0 ? "arrow.up" : "arrow.down")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(delta >= 0 ? Color.green : Color.red)
             Text("\(abs(delta), format: .percent.precision(.fractionLength(1))) \(label)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
-        .font(.footnote.weight(.medium))
-        .foregroundStyle(delta >= 0 ? Color.green : Color.red)
+    }
+}
+
+// MARK: - Trend Strip
+
+/// Thin, transparent row of period deltas. Lives outside the hero card to keep
+/// the hero calm — Direction C in the design exploration.
+struct TrendStrip: View {
+    let weekDelta: Double?
+    let monthDelta: Double?
+    let yearDelta: Double?
+
+    private var hasContent: Bool {
+        weekDelta != nil || monthDelta != nil || yearDelta != nil
+    }
+
+    var body: some View {
+        if hasContent {
+            HStack(spacing: 16) {
+                if let d = weekDelta  { DeltaBadge(delta: d, label: "w/w") }
+                if let d = monthDelta { DeltaBadge(delta: d, label: "m/m") }
+                if let d = yearDelta  { DeltaBadge(delta: d, label: "y/y") }
+            }
+            .frame(maxWidth: .infinity)
+        }
     }
 }
 
@@ -152,34 +185,18 @@ struct NetWorthHeroCard: View {
     let netWorth: Double
     let totalAssets: Double
     let totalLiabilities: Double
-    let weekDelta: Double?
-    let monthDelta: Double?
-    let yearDelta: Double?
+    let todaysGain: DashboardViewModel.TodaysGain?
     let currencyService: CurrencyService
 
     var body: some View {
         VStack(spacing: 6) {
-            Text("Total Net Worth")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
             Text(currencyService.formattedBase(netWorth))
                 .font(.system(size: 42, weight: .bold, design: .rounded))
                 .contentTransition(.numericText())
                 .animation(.spring(duration: 0.4), value: netWorth)
 
-            if weekDelta != nil || monthDelta != nil || yearDelta != nil {
-                HStack(spacing: 12) {
-                    if let delta = weekDelta {
-                        DeltaBadge(delta: delta, label: "w/w")
-                    }
-                    if let delta = monthDelta {
-                        DeltaBadge(delta: delta, label: "m/m")
-                    }
-                    if let delta = yearDelta {
-                        DeltaBadge(delta: delta, label: "y/y")
-                    }
-                }
+            if let gain = todaysGain {
+                todaysGainRow(gain)
             }
 
             Divider().padding(.vertical, 4)
@@ -206,6 +223,28 @@ struct NetWorthHeroCard: View {
         }
         .padding()
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// Absolute gain since the last snapshot, shown directly under the main value.
+    /// Sign is always rendered ("+" / "−") and colour-coded so the direction is
+    /// obvious at a glance regardless of locale formatting quirks for negatives.
+    @ViewBuilder
+    private func todaysGainRow(_ gain: DashboardViewModel.TodaysGain) -> some View {
+        let isUp = gain.amount >= 0
+        let sign = isUp ? "+" : "−"
+        HStack(spacing: 6) {
+            Image(systemName: isUp ? "arrow.up.right" : "arrow.down.right")
+            Text("\(sign)\(currencyService.formattedBase(abs(gain.amount)))")
+                .contentTransition(.numericText())
+            if let percent = gain.percent {
+                Text("(\(percent, format: .percent.precision(.fractionLength(2))))")
+                    .foregroundStyle(.secondary)
+            }
+            Text("today")
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(isUp ? Color.green : Color.red)
     }
 }
 
@@ -532,7 +571,7 @@ struct HistoryDayDetailView: View {
 // MARK: - Allocation Card
 
 struct AllocationCard: View {
-    let segments: [(category: AccountCategory, value: Double, color: String)]
+    let segments: [DashboardViewModel.AllocationSegment]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -546,7 +585,7 @@ struct AllocationCard: View {
             } else {
                 GeometryReader { geo in
                     HStack(spacing: 2) {
-                        ForEach(segments, id: \.category) { seg in
+                        ForEach(segments) { seg in
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(color(for: seg.color))
                                 .frame(width: geo.size.width * seg.value)
@@ -557,7 +596,7 @@ struct AllocationCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
                 VStack(spacing: 6) {
-                    ForEach(segments, id: \.category) { seg in
+                    ForEach(segments) { seg in
                         HStack {
                             Circle()
                                 .fill(color(for: seg.color))
