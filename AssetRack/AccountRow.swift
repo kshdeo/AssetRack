@@ -38,27 +38,12 @@ struct AccountRow: View {
                     .foregroundStyle(account.isLiability ? .red : .primary)
 
                 if let percent = account.dailyChangePercent {
-                    dailyChangeBadge(percent)
+                    // For liabilities the colour flips — debt going down reads as green.
+                    ChangeBadge(percent: percent, isGain: account.dailyChangeIsGain(percent))
                 }
             }
         }
         .padding(.vertical, 6)
-    }
-
-    /// Small directional indicator below the balance. Muted styling: only the
-    /// arrow carries the green/red signal; the percent sits in `.secondary`.
-    /// For liabilities, down-arrow = green (debt paid off).
-    @ViewBuilder
-    private func dailyChangeBadge(_ percent: Double) -> some View {
-        let isGain = account.dailyChangeIsGain(percent)
-        HStack(spacing: 3) {
-            Image(systemName: percent >= 0 ? "arrow.up" : "arrow.down")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(isGain ? Color.green : Color.red)
-            Text(abs(percent), format: .percent.precision(.fractionLength(2)))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
     }
 }
 

@@ -150,27 +150,6 @@ extension DashboardView {
     }
 }
 
-// MARK: - Delta Badge
-
-/// Small period-delta chip used in the TrendStrip. Intentionally muted — only
-/// the arrow carries the green/red signal; the text sits in `.secondary` so the
-/// strip doesn't compete for attention with the hero's "today" line.
-private struct DeltaBadge: View {
-    let delta: Double
-    let label: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: delta >= 0 ? "arrow.up" : "arrow.down")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(delta >= 0 ? Color.green : Color.red)
-            Text("\(abs(delta), format: .percent.precision(.fractionLength(1))) \(label)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
 // MARK: - Trend Strip
 
 /// Thin, transparent row of period deltas. Lives outside the hero card to keep
@@ -187,9 +166,9 @@ struct TrendStrip: View {
     var body: some View {
         if hasContent {
             HStack(spacing: 16) {
-                if let d = weekDelta  { DeltaBadge(delta: d, label: "w/w") }
-                if let d = monthDelta { DeltaBadge(delta: d, label: "m/m") }
-                if let d = yearDelta  { DeltaBadge(delta: d, label: "y/y") }
+                if let d = weekDelta  { ChangeBadge(percent: d, label: "w/w") }
+                if let d = monthDelta { ChangeBadge(percent: d, label: "m/m") }
+                if let d = yearDelta  { ChangeBadge(percent: d, label: "y/y") }
             }
             .frame(maxWidth: .infinity)
         }

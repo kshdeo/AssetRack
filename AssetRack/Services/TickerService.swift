@@ -56,6 +56,7 @@ final class TickerService {
                 for holding in yahooHoldings {
                     if let result = prices[holding.tickerSymbol] {
                         holding.lastPrice = result.price
+                        holding.previousClose = result.previousClose
                         holding.priceCurrency = result.currency
                         holding.lastPriceFetchedAt = fetchedAt
                         print("[TickerService] \(holding.tickerSymbol): \(result.price) \(result.currency)")
@@ -109,13 +110,14 @@ final class TickerService {
                         return
                     }
                     do {
-                        let price = try await self.fetchTradegatePrice(isin: holding.isin)
+                        let quote = try await self.fetchTradegateQuote(isin: holding.isin)
                         await MainActor.run {
-                            holding.lastPrice = price
+                            holding.lastPrice = quote.last
+                            holding.previousClose = quote.close
                             holding.priceCurrency = "EUR"
                             holding.lastPriceFetchedAt = Date()
                         }
-                        print("[TickerService] Tradegate \(holding.tickerSymbol) (\(holding.isin)): \(price) EUR")
+                        print("[TickerService] Tradegate \(holding.tickerSymbol) (\(holding.isin)): \(quote.last) EUR (prev close \(quote.close))")
                     } catch {
                         await MainActor.run {
                             self.errors[holding.tickerSymbol] = "Could not fetch Tradegate price"
@@ -127,15 +129,15 @@ final class TickerService {
         }
     }
 
-    private func fetchTradegatePrice(isin: String) async throws -> Double {
+    private func fetchTradegateQuote(isin: String) async throws -> (last: Double, close: Double) {
         let url = URL(string: "https://www.tradegatebsx.com/refresh.php?isin=\(isin)")!
         let (data, response) = try await URLSession.shared.data(from: url)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
         let quote = try JSONDecoder().decode(TradegateQuote.self, from: data)
-        guard quote.lastPrice > 0 else { throw URLError(.cannotParseResponse) }
-        return quote.lastPrice
+        guard quote.last > 0 else { throw URLError(.cannotParseResponse) }
+        return (quote.last, quote.close)
     }
 
     // MARK: - Private
@@ -167,7 +169,7 @@ final class TickerService {
         return crumbString
     }
 
-    private func fetchYahooPrices(symbols: String) async throws -> [String: (price: Double, currency: String)] {
+    private func fetchYahooPrices(symbols: String) async throws -> [String: (price: Double, previousClose: Double, currency: String)] {
         if crumb == nil { crumb = try await fetchCrumb() }
         print("[TickerService] Using crumb: '\(crumb ?? "nil")'")
 
@@ -210,13 +212,13 @@ final class TickerService {
         return try parseYahooQuotes(from: data)
     }
 
-    private func parseYahooQuotes(from data: Data) throws -> [String: (price: Double, currency: String)] {
+    private func parseYahooQuotes(from data: Data) throws -> [String: (price: Double, previousClose: Double, currency: String)] {
         do {
             let decoded = try JSONDecoder().decode(YahooQuoteResponse.self, from: data)
-            var result: [String: (price: Double, currency: String)] = [:]
+            var result: [String: (price: Double, previousClose: Double, currency: String)] = [:]
             for quote in decoded.quoteResponse.result {
                 if let price = quote.normalisedPrice {
-                    result[quote.symbol] = (price, quote.normalisedCurrency)
+                    result[quote.symbol] = (price, quote.normalisedPreviousClose ?? 0, quote.normalisedCurrency)
                 } else {
                     print("[TickerService] \(quote.symbol): no price field in response, skipping")
                 }
@@ -233,21 +235,24 @@ final class TickerService {
 // MARK: - Response models
 
 /// Tradegate `refresh.php` response.
-/// The `last` field uses German comma-decimal notation (e.g. "360,70") in some responses
-/// and a plain Double in others — handled via custom decoding.
+/// Numeric fields can be Doubles or German comma-decimal strings ("360,70") —
+/// the API switches between them inconsistently, so each field tolerates both.
 private struct TradegateQuote: Decodable {
-    let lastPrice: Double
+    let last: Double
+    let close: Double
 
-    enum CodingKeys: String, CodingKey { case last }
+    enum CodingKeys: String, CodingKey { case last, close }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let price = try? c.decode(Double.self, forKey: .last) {
-            lastPrice = price
-        } else {
-            let str = try c.decode(String.self, forKey: .last)
-            lastPrice = Double(str.replacingOccurrences(of: ",", with: ".")) ?? 0
-        }
+        last  = try TradegateQuote.decodeNumber(c, key: .last)
+        close = try TradegateQuote.decodeNumber(c, key: .close)
+    }
+
+    private static func decodeNumber(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Double {
+        if let value = try? c.decode(Double.self, forKey: key) { return value }
+        let str = try c.decode(String.self, forKey: key)
+        return Double(str.replacingOccurrences(of: ",", with: ".")) ?? 0
     }
 }
 
@@ -267,6 +272,12 @@ private struct YahooQuoteResponse: Decodable {
         /// Normalised price: GBp/GBX (pence) divided by 100 to get GBP
         var normalisedPrice: Double? {
             guard let raw = regularMarketPrice ?? regularMarketPreviousClose else { return nil }
+            return isPence ? raw / 100.0 : raw
+        }
+
+        /// Normalised previous close — same pence-to-pounds rule.
+        var normalisedPreviousClose: Double? {
+            guard let raw = regularMarketPreviousClose else { return nil }
             return isPence ? raw / 100.0 : raw
         }
 

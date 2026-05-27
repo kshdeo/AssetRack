@@ -539,7 +539,14 @@ struct HoldingPriceView: View {
                 Text(holding.value.currencyFormatted(code: holding.priceCurrency, fractionDigits: 2))
                     .font(.subheadline.weight(.semibold))
                     .contentTransition(.numericText())
-                if let fetchedAt = holding.lastPriceFetchedAt {
+
+                // Prefer the daily change badge when available — it's the
+                // more interesting signal. Fall back to the freshness
+                // timestamp (or "Not yet updated") when there's no prior
+                // price to compare against.
+                if let pct = holding.dailyChangePercent {
+                    ChangeBadge(percent: pct)
+                } else if let fetchedAt = holding.lastPriceFetchedAt {
                     Text("Updated \(fetchedAt.formatted(.relative(presentation: .named)))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)

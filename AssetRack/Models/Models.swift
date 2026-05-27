@@ -92,11 +92,25 @@ final class Holding {
     /// ISIN used when priceSource == .tradegate (e.g. "DE0007664039").
     var isin: String = ""
 
+    /// Previous trading day's close, as reported by the price API itself
+    /// (Yahoo's `regularMarketPreviousClose`, Tradegate's `close`). Source of
+    /// truth for the "daily change" badge — accurate across weekends/holidays
+    /// because the API returns the *previous trading session's* close.
+    var previousClose: Double = 0
+
     var value: Double { lastPrice * quantity }
 
     var priceSource: PriceSource {
         get { PriceSource(rawValue: priceSourceRaw) ?? .yahooFinance }
         set { priceSourceRaw = newValue.rawValue }
+    }
+
+    /// Percent change from `previousClose` to `lastPrice` (0.01 = 1%).
+    /// Returns nil when there's no previous close or the change is exactly zero.
+    var dailyChangePercent: Double? {
+        guard previousClose > 0 else { return nil }
+        let pct = (lastPrice - previousClose) / previousClose
+        return pct == 0 ? nil : pct
     }
 
     init(tickerSymbol: String, quantity: Double, priceSource: PriceSource = .yahooFinance, isin: String = "") {
