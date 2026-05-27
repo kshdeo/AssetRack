@@ -176,7 +176,7 @@ struct ProjectionView: View {
         }
         .sheet(isPresented: $showingAssumptions) {
             if let settings {
-                ProjectionAssumptionsView(settings: settings)
+                ProjectionAssumptionsView(settings: settings, currencyService: currencyService)
             }
         }
         .projectionData(
@@ -393,6 +393,7 @@ struct ProjectionBreakdownCard: View {
 struct ProjectionAssumptionsView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var settings: ProjectionSettings
+    let currencyService: CurrencyService
 
     var body: some View {
         NavigationStack {
@@ -420,13 +421,13 @@ struct ProjectionAssumptionsView: View {
                     amountRow(title: "Monthly income",   amount: $settings.monthlyIncome)
                     amountRow(title: "Monthly expenses", amount: $settings.monthlyExpenses)
                     LabeledContent("Net savings") {
-                        Text(settings.netMonthlySavings, format: .currency(code: "USD"))
+                        Text(currencyService.formattedBase(settings.netMonthlySavings))
                             .foregroundStyle(settings.netMonthlySavings >= 0 ? .green : .red)
                     }
                 } header: {
                     Text("Monthly cash flow")
                 } footer: {
-                    Text("Net savings (income − expenses) flow into investments each month. A negative net draws investments down — useful for retirement scenarios.")
+                    Text("Net savings (income − expenses) flow into investments each month. A negative net draws investments down — useful for retirement scenarios. All amounts in your base currency (\(currencyService.baseCurrency)).")
                 }
 
                 Section {
@@ -477,10 +478,11 @@ struct ProjectionAssumptionsView: View {
             Spacer()
             TextField("0",
                       value: amount,
-                      format: .number.precision(.fractionLength(0)))
+                      format: .currency(code: currencyService.baseCurrency)
+                                .precision(.fractionLength(0)))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
-                .frame(width: 100)
+                .frame(width: 120)
         }
     }
 }
