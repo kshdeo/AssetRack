@@ -58,6 +58,14 @@ struct DashboardView: View {
                         onSeeAll: { showingAllAccounts = true },
                         onEdit: { accountToEdit = $0 }
                     )
+
+                    if let lastUpdated = lastUpdated {
+                        Text("Last updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
@@ -123,6 +131,15 @@ struct DashboardView: View {
 // MARK: - DashboardView helpers
 
 extension DashboardView {
+    /// Most recent fetch across the two refreshable services. Reading both
+    /// `lastFetched`s inside the view body makes Observation track them, so the
+    /// "Last updated" footer auto-refreshes when either fires.
+    var lastUpdated: Date? {
+        [currencyService.lastFetched, ticker.lastFetched]
+            .compactMap { $0 }
+            .max()
+    }
+
     func refreshTickers() {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(300))

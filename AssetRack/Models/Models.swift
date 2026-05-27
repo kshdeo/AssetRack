@@ -140,6 +140,28 @@ final class Account: Identifiable {
 
     var signedBalance: Double { isLiability ? -currentBalance : currentBalance }
 
+    /// Percent change in `currentBalance` since the most recent snapshot recorded
+    /// before the start of today (0.01 = 1%). Returns `nil` when there is no
+    /// prior snapshot, the prior balance was zero, or the change is exactly zero.
+    /// Sign is from the balance perspective, not net-worth — callers flip for
+    /// liabilities via `Account.dailyChangeIsGain(_:)`.
+    var dailyChangePercent: Double? {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        guard let priorSnap = balanceHistory
+            .filter({ $0.recordedAt < startOfToday })
+            .max(by: { $0.recordedAt < $1.recordedAt }) else { return nil }
+        let prior = priorSnap.balance
+        guard prior != 0 else { return nil }
+        let pct = (currentBalance - prior) / abs(prior)
+        return pct == 0 ? nil : pct
+    }
+
+    /// Interpret a raw daily change as a gain (true = green) or a loss (false = red).
+    /// For assets, balance up = gain. For liabilities, balance down (debt paid off) = gain.
+    func dailyChangeIsGain(_ change: Double) -> Bool {
+        isLiability ? change <= 0 : change >= 0
+    }
+
     /// For brokerage accounts, balance = sum of holdings converted to account currency + cash.
     /// Pass a `convert` closure to apply FX; defaults to no conversion (same-currency assumption).
     func recomputeBalance(convert: (Double, String, String) -> Double = { amount, _, _ in amount }) {
