@@ -112,6 +112,8 @@ struct AddHistoricalEntryView: View {
                 account.balanceHistory.append(BalanceSnapshot(balance: value, recordedAt: noon))
             }
         }
+        // Keep currentBalance in sync with the latest snapshot we just wrote.
+        modelContext.reconcileAccountBalances()
         try? modelContext.save()
         dismiss()
     }

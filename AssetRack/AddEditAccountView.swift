@@ -394,8 +394,14 @@ struct AddEditAccountView: View {
                 let balance = parsedBalance ?? 0
                 account.currentBalance = balance
                 account.updatedAt = balanceDate
-                // SwiftData auto-inserts via @Relationship — no explicit insert needed
-                account.balanceHistory.append(BalanceSnapshot(balance: balance, recordedAt: balanceDate))
+                // Only record a snapshot when the value actually changed. A
+                // same-value snapshot would clutter history and reset the
+                // daily-change reference (making the badge flip to 0/disappear).
+                let latest = account.balanceHistory.max(by: { $0.recordedAt < $1.recordedAt })?.balance
+                if latest == nil || abs(latest! - balance) > 0.001 {
+                    // SwiftData auto-inserts via @Relationship — no explicit insert needed
+                    account.balanceHistory.append(BalanceSnapshot(balance: balance, recordedAt: balanceDate))
+                }
             }
         } else {
             let account = Account(

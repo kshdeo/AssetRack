@@ -45,6 +45,7 @@ struct AccountBalanceHistoryView: View {
                             for index in indices {
                                 modelContext.delete(sorted[index])
                             }
+                            modelContext.reconcileAccountBalances()
                             try? modelContext.save()
                         }
                     }
@@ -117,6 +118,7 @@ struct EditBalanceSnapshotView: View {
         guard let value = parsedBalance else { return }
         snapshot.balance = value
         snapshot.recordedAt = date
+        modelContext.reconcileAccountBalances()
         try? modelContext.save()
         dismiss()
     }

@@ -37,8 +37,8 @@ struct AccountRow: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(account.isLiability ? .red : .primary)
 
-                if let percent = account.dailyChangePercent {
-                    // For liabilities the colour flips — debt going down reads as green.
+                if let percent = account.dailyChangePercent(using: currencyService) {
+                    // Liabilities flip — debt going down reads as a gain (green).
                     ChangeBadge(percent: percent, isGain: account.dailyChangeIsGain(percent))
                 }
             }

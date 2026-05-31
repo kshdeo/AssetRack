@@ -95,6 +95,9 @@ struct DashboardView: View {
                 ProjectionView(currencyService: currencyService)
             }
             .task {
+                // Repair any accounts whose currentBalance drifted from their
+                // latest snapshot before this reconciliation existed.
+                modelContext.reconcileAccountBalances()
                 await currencyService.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
             }
@@ -559,6 +562,7 @@ struct HistoryDayDetailView: View {
                 of: date
             ) ?? date
         }
+        modelContext.reconcileAccountBalances()
         try? modelContext.save()
         dismiss()
     }

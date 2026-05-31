@@ -154,24 +154,48 @@ final class Account: Identifiable {
 
     var signedBalance: Double { isLiability ? -currentBalance : currentBalance }
 
-    /// Percent change in `currentBalance` since the most recent snapshot recorded
-    /// before the start of today (0.01 = 1%). Returns `nil` when there is no
-    /// prior snapshot, the prior balance was zero, or the change is exactly zero.
-    /// Sign is from the balance perspective, not net-worth — callers flip for
-    /// liabilities via `Account.dailyChangeIsGain(_:)`.
-    var dailyChangePercent: Double? {
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        guard let priorSnap = balanceHistory
-            .filter({ $0.recordedAt < startOfToday })
-            .max(by: { $0.recordedAt < $1.recordedAt }) else { return nil }
-        let prior = priorSnap.balance
-        guard prior != 0 else { return nil }
-        let pct = (currentBalance - prior) / abs(prior)
-        return pct == 0 ? nil : pct
+    /// Strict daily change badge (0.01 = 1%): today's value vs yesterday's.
+    /// Returns `nil` when nothing changed today — no badge for stale movements.
+    ///
+    /// - **Holdings accounts (brokerage):** sum of holdings' current value vs sum
+    ///   of holdings' `previousClose * quantity` (the prior trading session's
+    ///   close from the API), as a fraction of the account's prior total.
+    /// - **Manual accounts (cash, savings, property, liabilities):** current
+    ///   balance vs yesterday's carry-forward value (the most recent snapshot
+    ///   recorded strictly before today). An account untouched today returns
+    ///   `nil` — both sides are equal — so no badge appears.
+    ///
+    /// Sign is from the balance perspective; callers flip for liabilities via
+    /// `dailyChangeIsGain(_:)`.
+    func dailyChangePercent(using currency: CurrencyService) -> Double? {
+        if type.supportsHoldings {
+            var currentHoldings = 0.0
+            var priorHoldings   = 0.0
+            var hasReference    = false
+            for h in holdings where h.previousClose > 0 {
+                hasReference = true
+                currentHoldings += currency.convert(Money(h.value, h.priceCurrency), to: self.currency).amount
+                priorHoldings   += currency.convert(Money(h.previousClose * h.quantity, h.priceCurrency), to: self.currency).amount
+            }
+            guard hasReference else { return nil }
+            // Express against the account's prior total (cash is static day-over-day).
+            let base = priorHoldings + cashBalance
+            guard base > 0 else { return nil }
+            let pct = (currentHoldings - priorHoldings) / base
+            return pct == 0 ? nil : pct
+        } else {
+            let startOfToday = Calendar.current.startOfDay(for: Date())
+            guard let yesterday = balanceHistory
+                    .filter({ $0.recordedAt < startOfToday })
+                    .max(by: { $0.recordedAt < $1.recordedAt })?.balance,
+                  yesterday != 0 else { return nil }
+            let pct = (currentBalance - yesterday) / abs(yesterday)
+            return pct == 0 ? nil : pct
+        }
     }
 
-    /// Interpret a raw daily change as a gain (true = green) or a loss (false = red).
-    /// For assets, balance up = gain. For liabilities, balance down (debt paid off) = gain.
+    /// Interpret a change as a gain (true = green) or loss (false = red).
+    /// Assets: up = gain. Liabilities: down (debt paid off) = gain.
     func dailyChangeIsGain(_ change: Double) -> Bool {
         isLiability ? change <= 0 : change >= 0
     }
@@ -183,6 +207,22 @@ final class Account: Identifiable {
         currentBalance = holdings.reduce(0) { sum, holding in
             sum + convert(holding.value, holding.priceCurrency, currency)
         } + cashBalance
+    }
+
+    /// Sync `currentBalance` to the most recent snapshot for manual (non-holdings)
+    /// accounts, so the displayed "current" value never drifts from the account's
+    /// own history. Without this, editing history (which only writes snapshots)
+    /// leaves `currentBalance` stale — surfacing as a bogus daily-change % and a
+    /// wrong dashboard total. No-op for holdings accounts (their balance is driven
+    /// by live prices) and when already in sync. Returns true if it changed anything.
+    @discardableResult
+    func reconcileCurrentBalanceWithHistory() -> Bool {
+        guard !type.supportsHoldings else { return false }
+        guard let latest = balanceHistory.max(by: { $0.recordedAt < $1.recordedAt }) else { return false }
+        guard abs(currentBalance - latest.balance) > 0.001 else { return false }
+        currentBalance = latest.balance
+        updatedAt = latest.recordedAt
+        return true
     }
 
     init(name: String, type: AccountType, balance: Double, institution: String = "", currency: String = "USD") {
@@ -254,6 +294,19 @@ extension ModelContext {
             currency: base,
             recordedAt: date
         ))
+    }
+
+    /// Repair any manual accounts whose `currentBalance` has drifted from their
+    /// latest snapshot (e.g. after editing history, which only writes snapshots).
+    /// Idempotent — saves only when something actually changed. Call after any
+    /// snapshot mutation and once when the dashboard loads (to fix legacy data).
+    func reconcileAccountBalances() {
+        let accounts = (try? fetch(FetchDescriptor<Account>())) ?? []
+        var changed = false
+        for account in accounts where account.reconcileCurrentBalanceWithHistory() {
+            changed = true
+        }
+        if changed { try? save() }
     }
 }
 
