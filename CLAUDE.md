@@ -170,6 +170,11 @@ When two views or services share logic — same hash, same pipeline, same lifecy
 
 Heuristic: if you find yourself copying ten lines from another file, **stop and factor**.
 
+### 9. Do not run the build — the user runs it
+**Never invoke `xcodebuild` or any iOS build/run/test command.** The user builds and runs the app themselves in Xcode and reports back. Don't try to "verify" a change by compiling it yourself; trust the diff and let the user catch issues at runtime.
+
+This avoids redundant DerivedData churn, slow round-trips, and scheme/signing prompts that don't apply when the user is driving Xcode directly.
+
 ## Performance
 
 ### Cache heavy `Foundation` objects

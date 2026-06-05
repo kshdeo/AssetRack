@@ -676,14 +676,19 @@ struct AddHoldingView: View {
 
     // MARK: - Yahoo Finance section
 
+    @ViewBuilder
     private var yahooSection: some View {
+        searchSection
+        searchResultsSection
         Section {
             TextField("Ticker symbol (e.g. VOO, AAPL, BTC-USD)", text: $tickerSymbol)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.characters)
             pricePreviewRow
+        } header: {
+            Text("Ticker")
         } footer: {
-            Text("Use Yahoo Finance symbols. Crypto: BTC-USD, ETH-USD.")
+            Text("Use Yahoo Finance symbols, or use search above. Crypto: BTC-USD, ETH-USD.")
         }
     }
 
@@ -691,12 +696,35 @@ struct AddHoldingView: View {
 
     @ViewBuilder
     private var tradegateSections: some View {
-        // Search
+        searchSection
+        searchResultsSection
+        Section {
+            HStack {
+                TextField("Ticker / name (e.g. VOW3)", text: $tickerSymbol)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.characters)
+            }
+            TextField("ISIN (e.g. DE0007664039)", text: $isin)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
+            pricePreviewRow
+        } header: {
+            Text("Details")
+        } footer: {
+            Text("Prices fetched from Tradegate Exchange in EUR.")
+        }
+    }
+
+    // MARK: - Shared search UI
+
+    /// Search input + status footer. Reused by both Yahoo (Finnhub-backed)
+    /// and Tradegate. The placeholder adapts to the active source.
+    private var searchSection: some View {
         Section {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField(priceSource == .tradegate ? "Search by ISIN or name…" : "Search by name or ticker…", text: $searchQuery)
+                TextField(searchPlaceholder, text: $searchQuery)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onChange(of: searchQuery) { _, newValue in
@@ -720,42 +748,43 @@ struct AddHoldingView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
 
-        // Search results
+    @ViewBuilder
+    private var searchResultsSection: some View {
         if !searchResults.isEmpty {
             Section("Results") {
                 ForEach(searchResults) { result in
                     Button { selectResult(result) } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(result.description)
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                            Text("\(result.displaySymbol) · \(result.type)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.description)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                Text("\(result.displaySymbol) · \(result.type)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, 2)
+                        .contentShape(Rectangle())
                     }
+                    // .plain so .primary / .secondary text colours win over
+                    // the default accent-blue Button tinting inside Forms.
+                    .buttonStyle(.plain)
                 }
             }
         }
+    }
 
-        // Resolved details (shown once ticker is set)
-        Section {
-            HStack {
-                TextField("Ticker / name (e.g. VOW3)", text: $tickerSymbol)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.characters)
-            }
-            TextField("ISIN (e.g. DE0007664039)", text: $isin)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.characters)
-            pricePreviewRow
-        } header: {
-            Text("Details")
-        } footer: {
-            Text("Prices fetched from Tradegate Exchange in EUR.")
-        }
+    private var searchPlaceholder: String {
+        priceSource == .tradegate
+            ? "Search by ISIN or name…"
+            : "Search by company name or ticker…"
     }
 
     // MARK: - Search logic
