@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Bindable var currency: CurrencyService
 
     @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     // Export
     @State private var exportURL: URL?
@@ -100,6 +101,25 @@ struct SettingsView: View {
                     Text("Data")
                 } footer: {
                     Text("Export saves all accounts and holdings to a JSON file. Import replaces all existing accounts.")
+                }
+
+                // MARK: About
+                Section {
+                    Button {
+                        // Dismiss Settings first, then flip the flag — otherwise the
+                        // dashboard underneath would swap to OnboardingView while
+                        // this sheet is still on top.
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            hasCompletedOnboarding = false
+                        }
+                    } label: {
+                        Label("Show Welcome Tour", systemImage: "sparkles")
+                    }
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("Re-runs the first-launch tour. Your accounts and data stay untouched.")
                 }
             }
             .navigationTitle("Settings")
