@@ -275,12 +275,18 @@ struct NetWorthChartCard: View {
         return historyEntries.first(where: { $0.date == date })?.totalInBase ?? 0
     }
 
-    // Colors keyed by category raw value for chartForegroundStyleScale
+    // Colors keyed by category raw value for chartForegroundStyleScale.
+    // Each value pulls from `AccountCategory.accentColor`, so the dashboard,
+    // allocation pie, projection chart, and Add Account picker stay in sync
+    // automatically — change a colour in one place and every screen updates.
+    // (The Charts API requires a `KeyValuePairs` literal, so we can't build
+    // this dynamically from `allCases`.) Liabilities are excluded; the
+    // history chart shows assets only.
     private static let categoryColors: KeyValuePairs<String, Color> = [
-        AccountCategory.cashAndBank.rawValue: .teal,
-        AccountCategory.investments.rawValue: .blue,
-        AccountCategory.pension.rawValue:     .purple,
-        AccountCategory.realEstate.rawValue:  .indigo,
+        AccountCategory.cashAndBank.rawValue: AccountCategory.cashAndBank.accentColor,
+        AccountCategory.investments.rawValue: AccountCategory.investments.accentColor,
+        AccountCategory.pension.rawValue:     AccountCategory.pension.accentColor,
+        AccountCategory.realEstate.rawValue:  AccountCategory.realEstate.accentColor,
     ]
 
     var body: some View {
@@ -587,7 +593,7 @@ struct AllocationCard: View {
                     HStack(spacing: 2) {
                         ForEach(segments) { seg in
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(color(for: seg.color))
+                                .fill(seg.color)
                                 .frame(width: geo.size.width * seg.value)
                         }
                     }
@@ -599,7 +605,7 @@ struct AllocationCard: View {
                     ForEach(segments) { seg in
                         HStack {
                             Circle()
-                                .fill(color(for: seg.color))
+                                .fill(seg.color)
                                 .frame(width: 8, height: 8)
                             Text(seg.category.rawValue)
                                 .font(.subheadline)
@@ -616,16 +622,6 @@ struct AllocationCard: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private func color(for name: String) -> Color {
-        switch name {
-        case "teal":   return .teal
-        case "blue":   return .blue
-        case "purple": return .purple
-        case "indigo": return .indigo
-        case "red":    return .red
-        default:       return .gray
-        }
-    }
 }
 
 // MARK: - Projection Teaser Card

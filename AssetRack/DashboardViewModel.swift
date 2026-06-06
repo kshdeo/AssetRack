@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 // MARK: - Stacked chart data
 
@@ -90,7 +91,7 @@ final class DashboardViewModel {
         var id: AccountCategory { category }
         let category: AccountCategory
         let value: Double        // share of total assets (0…1)
-        let color: String
+        let color: Color
     }
 
     struct AccountHistoryEntry: Identifiable {
@@ -290,18 +291,8 @@ final class DashboardViewModel {
         }
 
         return grouped
-            .map { AllocationSegment(category: $0.key, value: $0.value / total, color: colorName(for: $0.key)) }
+            .map { AllocationSegment(category: $0.key, value: $0.value / total, color: $0.key.accentColor) }
             .sorted { $0.value > $1.value }
-    }
-
-    private func colorName(for category: AccountCategory) -> String {
-        switch category {
-        case .cashAndBank:  return "teal"
-        case .investments:  return "blue"
-        case .pension:      return "purple"
-        case .realEstate:   return "indigo"
-        case .liabilities:  return "red"
-        }
     }
 
     // MARK: - Accounts list

@@ -288,11 +288,13 @@ struct ProjectionChartCard: View {
     let points: [ProjectionPoint]
     let stackedSegments: [ProjectionStackedPoint]
 
+    // See `AccountCategory.accentColor` — the single source of truth for the
+    // app-wide category palette. Charts API requires a literal here.
     private static let categoryColors: KeyValuePairs<String, Color> = [
-        AccountCategory.cashAndBank.rawValue: .teal,
-        AccountCategory.investments.rawValue: .blue,
-        AccountCategory.pension.rawValue:     .purple,
-        AccountCategory.realEstate.rawValue:  .indigo,
+        AccountCategory.cashAndBank.rawValue: AccountCategory.cashAndBank.accentColor,
+        AccountCategory.investments.rawValue: AccountCategory.investments.accentColor,
+        AccountCategory.pension.rawValue:     AccountCategory.pension.accentColor,
+        AccountCategory.realEstate.rawValue:  AccountCategory.realEstate.accentColor,
     ]
 
     var body: some View {

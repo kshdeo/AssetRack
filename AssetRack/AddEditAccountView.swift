@@ -313,31 +313,26 @@ struct AddEditAccountView: View {
                                     selectedType = type
                                 }
                             } label: {
-                                HStack(spacing: 12) {
+                                HStack(spacing: 14) {
                                     Image(systemName: type.systemImage)
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundStyle(type.isLiability ? .red : .blue)
-                                        .frame(width: 28, height: 28)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(type.accentColor)
+                                        .frame(width: 36, height: 36)
                                         .background(
-                                            (type.isLiability ? Color.red : Color.blue).opacity(0.12),
-                                            in: RoundedRectangle(cornerRadius: 7)
+                                            type.accentColor.opacity(0.14),
+                                            in: RoundedRectangle(cornerRadius: 9)
                                         )
 
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(type.displayName)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.primary)
-                                        Text(category.rawValue)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Text(type.displayName)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.primary)
 
                                     Spacer()
 
                                     if selectedType == type {
                                         Image(systemName: "checkmark")
                                             .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(.blue)
+                                            .foregroundStyle(type.accentColor)
                                     }
                                 }
                                 .contentShape(Rectangle())

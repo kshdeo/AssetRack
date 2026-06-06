@@ -8,11 +8,11 @@ struct AccountRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: account.type.systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(account.isLiability ? .red : .blue)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(account.type.accentColor)
                 .frame(width: 32, height: 32)
                 .background(
-                    (account.isLiability ? Color.red : Color.blue).opacity(0.12),
+                    account.type.accentColor.opacity(0.14),
                     in: RoundedRectangle(cornerRadius: 8)
                 )
 
