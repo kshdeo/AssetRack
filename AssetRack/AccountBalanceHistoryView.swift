@@ -118,6 +118,10 @@ struct EditBalanceSnapshotView: View {
         guard let value = parsedBalance else { return }
         snapshot.balance = value
         snapshot.recordedAt = date
+        // Moving the date can collide with another day's snapshot for the
+        // same account — collapse any duplicates immediately rather than
+        // waiting for the next dashboard launch.
+        modelContext.consolidateAllDailyHistory()
         modelContext.reconcileAccountBalances()
         try? modelContext.save()
         dismiss()

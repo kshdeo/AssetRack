@@ -73,13 +73,14 @@ final class TickerService {
                 await fetchTradegatePrices(tradegateHoldings)
             }
 
-            // Recompute balances and record snapshots for all brokerage accounts
+            // Recompute balances and record snapshots for all brokerage accounts.
+            // `setBalanceSnapshot` upserts per calendar day — refreshing twice
+            // in one day updates the day's row instead of adding a duplicate.
             for account in accounts where account.type.supportsHoldings {
                 let oldBalance = account.currentBalance
                 account.recomputeBalance(convert: currency.convert)
                 if abs(account.currentBalance - oldBalance) > 0.01 {
-                    // SwiftData auto-inserts via @Relationship — no explicit insert needed
-                    account.balanceHistory.append(BalanceSnapshot(balance: account.currentBalance))
+                    account.setBalanceSnapshot(balance: account.currentBalance)
                     account.updatedAt = Date()
                 }
             }

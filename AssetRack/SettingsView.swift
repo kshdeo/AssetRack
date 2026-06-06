@@ -100,7 +100,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Export saves all accounts and holdings to a JSON file. Import replaces all existing accounts.")
+                    Text("Export saves your accounts, holdings, balance history, net-worth history, and projection assumptions to a JSON file. Import replaces all existing data.")
                 }
 
                 // MARK: About
@@ -151,7 +151,7 @@ struct SettingsView: View {
                 Button("Import", role: .destructive) { commitImport() }
             } message: {
                 if let backup = pendingBackup {
-                    Text("This will replace all \(accountCount) existing accounts with \(backup.accounts.count) accounts from the backup file.")
+                    Text(importConfirmMessage(for: backup))
                 }
             }
         }
@@ -161,13 +161,42 @@ struct SettingsView: View {
         (try? modelContext.fetch(FetchDescriptor<Account>()))?.count ?? 0
     }
 
+    /// Human-readable summary of what an import will replace — driven by what's
+    /// actually in the backup file so v1 (accounts only) and v2 (history +
+    /// projection) read accurately.
+    private func importConfirmMessage(for backup: AppBackup) -> String {
+        var parts = ["\(backup.accounts.count) accounts"]
+        let snapshotCount = backup.accounts.reduce(0) { $0 + ($1.balanceHistory?.count ?? 0) }
+        if snapshotCount > 0 {
+            parts.append("\(snapshotCount) history entries")
+        }
+        if let nw = backup.netWorthSnapshots, !nw.isEmpty {
+            parts.append("\(nw.count) net-worth snapshots")
+        }
+        if backup.projectionSettings != nil {
+            parts.append("projection assumptions")
+        }
+        let summary = parts.joined(separator: ", ")
+        return "This will replace your current data (\(accountCount) accounts) with \(summary) from the backup file."
+    }
+
     // MARK: - Export
 
     private func exportData() {
         exportError = nil
         do {
+            // The full SwiftData state. `balanceHistory` rides along with each
+            // account via its relationship; net-worth snapshots and projection
+            // settings live in their own stores.
             let accounts = try modelContext.fetch(FetchDescriptor<Account>())
-            let backup = AppBackup.from(accounts: accounts)
+            let netWorthSnapshots = try modelContext.fetch(FetchDescriptor<NetWorthSnapshot>())
+            let projection = modelContext.projectionSettings()
+
+            let backup = AppBackup.from(
+                accounts: accounts,
+                netWorthSnapshots: netWorthSnapshots,
+                projectionSettings: projection
+            )
             exportURL = try backup.writeToTempFile()
         } catch {
             exportError = "Export failed: \(error.localizedDescription)"
@@ -198,11 +227,16 @@ struct SettingsView: View {
         guard let backup = pendingBackup else { return }
         importError = nil
         do {
-            // Delete all existing accounts (cascade removes holdings + history)
-            let existing = try modelContext.fetch(FetchDescriptor<Account>())
-            for account in existing { modelContext.delete(account) }
+            // 1. Wipe accounts (cascade removes holdings + balance history) and
+            //    net-worth snapshots. Projection settings are a singleton — we
+            //    overwrite its fields rather than re-inserting.
+            let existingAccounts = try modelContext.fetch(FetchDescriptor<Account>())
+            for account in existingAccounts { modelContext.delete(account) }
 
-            // Insert accounts from backup
+            let existingNetWorth = try modelContext.fetch(FetchDescriptor<NetWorthSnapshot>())
+            for snap in existingNetWorth { modelContext.delete(snap) }
+
+            // 2. Re-create accounts, holdings, and per-account history.
             for ab in backup.accounts {
                 let account = Account(
                     name: ab.name,
@@ -212,14 +246,56 @@ struct SettingsView: View {
                     currency: ab.currency
                 )
                 account.cashBalance = ab.cashBalance
+                if let createdAt = ab.createdAt { account.createdAt = createdAt }
+                if let updatedAt = ab.updatedAt { account.updatedAt = updatedAt }
                 modelContext.insert(account)
 
                 for hb in ab.holdings {
                     let holding = Holding(tickerSymbol: hb.tickerSymbol, quantity: hb.quantity)
                     holding.lastPrice = hb.lastPrice
                     holding.priceCurrency = hb.priceCurrency
+                    if let name = hb.name { holding.name = name }
+                    if let isin = hb.isin { holding.isin = isin }
+                    if let src = hb.priceSourceRaw { holding.priceSourceRaw = src }
+                    if let prev = hb.previousClose { holding.previousClose = prev }
+                    holding.lastPriceFetchedAt = hb.lastPriceFetchedAt
                     account.holdings.append(holding)
                 }
+
+                // v2 — per-account history. Append to the relationship so
+                // SwiftData auto-inserts each snapshot under the parent (no
+                // explicit insert, per Rule #5).
+                for bs in ab.balanceHistory ?? [] {
+                    account.balanceHistory.append(
+                        BalanceSnapshot(balance: bs.balance, recordedAt: bs.recordedAt)
+                    )
+                }
+            }
+
+            // 3. v2 — net-worth snapshots.
+            for ns in backup.netWorthSnapshots ?? [] {
+                let snap = NetWorthSnapshot(
+                    netWorth: ns.netWorth,
+                    totalAssets: ns.totalAssets,
+                    totalLiabilities: ns.totalLiabilities,
+                    currency: ns.currency,
+                    recordedAt: ns.recordedAt
+                )
+                modelContext.insert(snap)
+            }
+
+            // 4. v2 — projection settings. Singleton: fetch (creates on first
+            // access) and overwrite fields in place.
+            if let ps = backup.projectionSettings {
+                let settings = modelContext.projectionSettings()
+                settings.cashRate              = ps.cashRate
+                settings.investmentsRate       = ps.investmentsRate
+                settings.pensionRate           = ps.pensionRate
+                settings.realEstateRate        = ps.realEstateRate
+                settings.liabilityPaydownYears = ps.liabilityPaydownYears
+                settings.monthlyIncome         = ps.monthlyIncome
+                settings.monthlyExpenses       = ps.monthlyExpenses
+                settings.horizonYears          = ps.horizonYears
             }
 
             try modelContext.save()

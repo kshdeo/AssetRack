@@ -96,21 +96,14 @@ struct AddHistoricalEntryView: View {
 
     private func save() {
         let calendar = Calendar.current
-        let targetDay = calendar.startOfDay(for: date)
+        // Anchor snapshots at noon so they sort predictably within the day and
+        // don't collide with midnight edge cases when comparing to "today".
         let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
 
         for account in accounts {
             guard let text = balanceTexts[account.id],
                   let value = Double(text.replacingOccurrences(of: ",", with: "")) else { continue }
-
-            // Update existing snapshot for this day if one exists, otherwise create new
-            if let existing = account.balanceHistory
-                .filter({ calendar.startOfDay(for: $0.recordedAt) == targetDay })
-                .max(by: { $0.recordedAt < $1.recordedAt }) {
-                existing.balance = value
-            } else {
-                account.balanceHistory.append(BalanceSnapshot(balance: value, recordedAt: noon))
-            }
+            account.setBalanceSnapshot(balance: value, at: noon)
         }
         // Keep currentBalance in sync with the latest snapshot we just wrote.
         modelContext.reconcileAccountBalances()

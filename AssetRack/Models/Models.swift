@@ -225,6 +225,52 @@ final class Account: Identifiable {
         return true
     }
 
+    /// Upsert a balance snapshot for the calendar day containing `date`. We
+    /// keep **at most one snapshot per day per account** — if an entry for
+    /// that day already exists, its `balance` and `recordedAt` are updated in
+    /// place; otherwise a fresh snapshot is appended. Single entry point so
+    /// every callsite that records a balance (manual edit, ticker refresh,
+    /// historical entry) gets the same dedupe semantics.
+    ///
+    /// Returns the snapshot that ended up representing the day.
+    @discardableResult
+    func setBalanceSnapshot(balance: Double, at date: Date = Date()) -> BalanceSnapshot {
+        let calendar = Calendar.current
+        if let existing = balanceHistory.first(where: {
+            calendar.isDate($0.recordedAt, inSameDayAs: date)
+        }) {
+            existing.balance = balance
+            // Bump the timestamp so "latest" ordering reflects this update.
+            existing.recordedAt = date
+            return existing
+        }
+        let fresh = BalanceSnapshot(balance: balance, recordedAt: date)
+        // SwiftData auto-inserts relationship children — no explicit insert (Rule #5).
+        balanceHistory.append(fresh)
+        return fresh
+    }
+
+    /// One-time backfill: collapse any calendar days with multiple snapshots
+    /// down to the most recent one. Returns the number of rows deleted so the
+    /// caller can decide whether to save. Idempotent.
+    @discardableResult
+    func consolidateDailyHistory(in context: ModelContext) -> Int {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: balanceHistory) {
+            calendar.startOfDay(for: $0.recordedAt)
+        }
+        var deleted = 0
+        for (_, dayGroup) in grouped where dayGroup.count > 1 {
+            // Keep the most recently recorded; delete the rest.
+            let sorted = dayGroup.sorted { $0.recordedAt > $1.recordedAt }
+            for stale in sorted.dropFirst() {
+                context.delete(stale)
+                deleted += 1
+            }
+        }
+        return deleted
+    }
+
     init(name: String, type: AccountType, balance: Double, institution: String = "", currency: String = "USD") {
         self.id = UUID()
         self.name = name
@@ -307,6 +353,20 @@ extension ModelContext {
             changed = true
         }
         if changed { try? save() }
+    }
+
+    /// One-time backfill across every account: collapse multi-snapshot days
+    /// down to one row per day, keeping the most recent. Safe to call on
+    /// every launch — does nothing once history is already clean.
+    @discardableResult
+    func consolidateAllDailyHistory() -> Int {
+        let accounts = (try? fetch(FetchDescriptor<Account>())) ?? []
+        var total = 0
+        for account in accounts {
+            total += account.consolidateDailyHistory(in: self)
+        }
+        if total > 0 { try? save() }
+        return total
     }
 }
 
