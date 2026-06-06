@@ -96,11 +96,8 @@ struct DashboardView: View {
             }
             .task {
                 // Repair any accounts whose currentBalance drifted from their
-                // latest snapshot before this reconciliation existed, and
-                // collapse legacy multi-snapshot days down to one row per day.
-                // Both helpers are idempotent — no-op once data is clean.
+                // latest snapshot before this reconciliation existed.
                 modelContext.reconcileAccountBalances()
-                modelContext.consolidateAllDailyHistory()
                 await currencyService.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
             }
