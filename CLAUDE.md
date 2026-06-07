@@ -4,12 +4,14 @@
 AssetRack is an iOS Net Worth Tracker — a personal finance app for tracking **net worth across multiple accounts in one place**, with insights and projections. The core value is a single unified view of assets and liabilities rather than logging into multiple apps.
 
 **GitHub:** `git@github.com:kshdeo/AssetRack.git`
+**Home-screen name:** Assets Rack
+**Phase 1 status:** ✅ Complete and uncommitted (biometric lock was the final item)
 
 ## Architecture
 - **Models** – `Account`, `Holding`, `BalanceSnapshot`, `NetWorthSnapshot`, `ProjectionSettings` (`@Model`)
-- **Services** – `CurrencyService` (FX rates, currency arithmetic, formatting), `TickerService` (Yahoo Finance + Tradegate prices), `ISINLookupService` (Finnhub + Tradegate search, live price preview), `ProjectionService` (pure-growth net worth projection)
+- **Services** – `CurrencyService` (FX rates, currency arithmetic, formatting), `TickerService` (Yahoo Finance + Tradegate prices), `ISINLookupService` (Finnhub + Tradegate search, live price preview), `ProjectionService` (pure-growth net worth projection), `StatementScanner` (OCR + Apple Intelligence structured extraction from bank screenshots, iOS 26+), `BiometricLockService` (LocalAuthentication-based app lock)
 - **ViewModels** – `DashboardViewModel` (`@Observable`) computes chart/history data
-- **Views** – `DashboardView`, `AccountsListView`, `AccountRow`, `AddEditAccountView`, `AccountBalanceHistoryView`, `AddHistoricalEntryView`, `SettingsView`, `ProjectionView`
+- **Views** – `DashboardView`, `AccountsListView`, `AccountRow`, `AddEditAccountView`, `AccountBalanceHistoryView`, `AddHistoricalEntryView`, `SettingsView`, `ProjectionView`, `OnboardingView`, `LockView`
 - **Tests** – `CurrencyServiceTests` (20 tests, Swift Testing framework)
 
 ## Account Types
@@ -28,10 +30,12 @@ AssetRack is an iOS Net Worth Tracker — a personal finance app for tracking **
 ## Tech Stack Decisions
 
 - **SwiftUI** — greenfield app, no reason to use UIKit
-- **SwiftData (iOS 17+)** — cleaner API than Core Data, native CloudKit sync with minimal boilerplate
+- **SwiftData (iOS 18.2+)** — cleaner API than Core Data, native CloudKit sync with minimal boilerplate
 - **CloudKit** — free, private, native; via `ModelConfiguration(cloudKitDatabase: .automatic)`
 - **`@Observable` + MVVM** — simpler than TCA for this scope, avoids ceremony
 - **Swift Charts** — built-in from iOS 16, handles area charts, interactive scrubbing
+- **LocalAuthentication** — biometric lock (Face ID / Touch ID / passcode fallback) in `BiometricLockService`
+- **Vision + FoundationModels** — `StatementScanner` uses `VNRecognizeTextRequest` for OCR then Apple Intelligence (`FoundationModels`, iOS 26+) for structured extraction. Guarded by `#if canImport(FoundationModels)` + `@available(iOS 26.0, *)` so the rest of the app builds on 18.2.
 - **No third-party dependencies in Phase 1** — only planned third-party integration is Plaid (Phase 2, requires backend)
 
 ## Data Model Design Decisions
@@ -50,13 +54,20 @@ Storing rawValue as `String` avoids CloudKit migration edge cases. Never surpris
 Liabilities are stored as positive numbers (a £310K mortgage = `310000`). `signedBalance` flips the sign at calculation time. Net worth is then just `accounts.reduce(0) { $0 + $1.signedBalance }`.
 
 ### `BalanceSnapshot` on each `Account`
-Tracks individual account history. Used for the history chart, per-account detail views, and the carry-forward logic.
+Tracks individual account history. Used for the history chart, per-account detail views, and the carry-forward logic. Always written through `account.setBalanceSnapshot(balance:at:)` — one row per calendar day, upserted in place when the same day is re-saved.
 
 ### `NetWorthSnapshot` as a separate model
 Don't recompute net worth from all accounts on every render. Records point-in-time history that survives account deletions.
 
 ### Default values on all `@Model` properties
 Required by CloudKit — forgetting this causes silent sync failures.
+
+### Backup format versioning
+`AppBackup` carries a `version: Int` field:
+- **v1** — accounts + holdings + currentBalance only
+- **v2** — adds `balanceHistory`, `netWorthSnapshots`, `projectionSettings`, plus previously-missing holding fields (`previousClose`, `priceSourceRaw`, `isin`, `name`, `lastPriceFetchedAt`)
+
+New fields are added as `Optional` so older backups decode cleanly without migration.
 
 ## FX Rate Source
 **Current:** [frankfurter.app](https://frankfurter.app) — free, no API key, ECB data, cached in `UserDefaults`, refreshed daily.
@@ -100,7 +111,7 @@ currencyService.formattedBase(amount)     // formats a Double in the base curren
 ```
 **Never** do this:
 ```swift
-// ❌ wrong – formatting inline, bypassing CurrencyService
+// ❌ wrong — formatting inline, bypassing CurrencyService
 amount.currencyFormatted(code: currencyService.baseCurrency)
 someDouble.currencyFormatted(code: "USD")
 ```
@@ -124,13 +135,6 @@ Never compute assets/liabilities manually outside this method.
 A View's `body` re-runs every time SwiftUI invalidates the view — frequently, and often without any real data change. Do **not** do any of the following inside `body`:
 
 - Build arrays or call services that compute them
-  ```swift
-  // ❌ wrong — runs every render
-  var body: some View {
-      let points = ProjectionService.project(...)
-      ...
-  }
-  ```
 - Trigger SwiftData side-effects (`modelContext.projectionSettings()`, `insert`, `save`)
 - Loop / reduce over `@Query` results to produce derived data
 - Instantiate models or service objects
@@ -159,14 +163,9 @@ var body: some View {
 When two views or services share logic — same hash, same pipeline, same lifecycle — extract it. Prefer, in roughly this order:
 
 - **Static helpers on a ViewModel / service** for pure functions
-  ```swift
-  // ✅ one source of truth
-  ProjectionViewModel.dataKey(accounts:settings:horizonYears:baseCurrency:)
-  ```
-  not the same `var dataKey: Int { var hasher = Hasher(); ... }` block copy-pasted into every view.
 - **Shared `@Observable` ViewModel** so each call site reads from the same computed state instead of recomputing it themselves.
-- **`ViewModifier`** when more than one view applies the same chain of lifecycle modifiers (`.onAppear { ... }.task(id: ...) { ... }`). Give it a name that states intent: `.projectionData(...)`, not `.commonStuff(...)`.
-- **Subview composition** — split a view into named subviews (`ProjectionSummaryCard`, `ProjectionChartCard`) and reuse those, instead of inlining the same `VStack { ... }.padding().background(...)` structure.
+- **`ViewModifier`** when more than one view applies the same chain of lifecycle modifiers.
+- **Subview composition** — split a view into named subviews and reuse those.
 
 Heuristic: if you find yourself copying ten lines from another file, **stop and factor**.
 
@@ -174,6 +173,13 @@ Heuristic: if you find yourself copying ten lines from another file, **stop and 
 **Never invoke `xcodebuild` or any iOS build/run/test command.** The user builds and runs the app themselves in Xcode and reports back. Don't try to "verify" a change by compiling it yourself; trust the diff and let the user catch issues at runtime.
 
 This avoids redundant DerivedData churn, slow round-trips, and scheme/signing prompts that don't apply when the user is driving Xcode directly.
+
+### 10. Always write balance snapshots through `setBalanceSnapshot`
+All callsites that write a manual account's balance (save, historical entry, import) must use:
+```swift
+account.setBalanceSnapshot(balance: balance, at: date)
+```
+This enforces one snapshot per calendar day (upsert semantics) and is the single source of truth for history deduplication. Never append a `BalanceSnapshot` directly to `account.balanceHistory`.
 
 ## Performance
 
@@ -216,8 +222,44 @@ func formatted(_ money: Money) -> String
 func formattedBase(_ amount: Double) -> String
 ```
 
+### BiometricLockService
+`@Observable @MainActor` singleton injected at the App level:
+```swift
+// AssetRackApp
+let lockService = BiometricLockService()
+// ...
+ContentView().environment(lockService)
+```
+`ContentView` reads `lockService.isLocked` and shows `LockView` when true. It calls `lockService.lockIfEnabled()` in `.onChange(of: scenePhase)` when the app moves to `.background`. `LockView` auto-triggers `authenticate()` via `.task` on appear. Settings reads the service from environment to toggle `isEnabled`.
+
+### StatementScanner
+Two-stage pipeline, iOS 26+ only:
+1. `VNRecognizeTextRequest` runs OCR on a `UIImage` (background thread via `withCheckedThrowingContinuation`)
+2. `FoundationModels.LanguageModelSession` extracts structured fields (`@Generable ExtractedAccountSchema`) from the raw text
+
+`AddEditAccountView` shows the scanner entry point via `PhotosPicker` in the "add" flow only. The picker writes to `pendingScanItem`; a `.task(id: pendingScanItem)` reacts and calls `performScan(_:)`, which merges results into the form without overwriting already-filled fields. The entry point is always visible but disabled with an explanatory subtitle when Apple Intelligence isn't available.
+
 ### TickerService threading
 `fetch(context:currency:)` and `fetchIfNeeded(context:currency:)` are both `@MainActor` to satisfy Swift 6 Sendability requirements for `ModelContext`.
+
+### ModelContext helpers
+```swift
+// Record a net worth snapshot (call after any balance change)
+modelContext.recordNetWorthSnapshot(currency: currencyService, at: date)
+
+// Repair accounts whose currentBalance drifted from their latest snapshot
+// (call after snapshot mutations and on dashboard load)
+modelContext.reconcileAccountBalances()
+
+// Collapse any multi-snapshot days to one row per day (idempotent)
+modelContext.consolidateAllDailyHistory()
+```
+
+### Balance snapshot upsert
+```swift
+// One row per calendar day — re-saves the same day update in place
+account.setBalanceSnapshot(balance: balance, at: date)
+```
 
 ### History / chart data flow
 - `DashboardViewModel.stackedHistoryData(from:currency:)` — per-category stacked area chart data from `BalanceSnapshot`; always appends today using live `account.currentBalance`
@@ -242,12 +284,12 @@ Wrapped in `Task { @MainActor in }` to avoid `-999 NSURLErrorDomain cancelled` f
 
 ### Previews
 `ModelContainer.previewContainer` — in-memory, pre-seeded with mock accounts and snapshots. Used in all `#Preview` blocks.
-`ModelContainer.appContainer` — production CloudKit-backed container, used only in `NetWorthApp.swift`.
+`ModelContainer.appContainer` — production CloudKit-backed container, used only in `AssetRackApp.swift`.
 
 ## Roadmap
 
-### Remaining Phase 1
-- 🔜 **Biometric lock** — `LocalAuthentication`, quick to add
+### Phase 1 — ✅ Complete (not yet pushed to origin)
+All items shipped. The two unpushed commits on `main` plus the current working-tree changes (biometric lock, StatementScanner, scan-statement in AddEditAccountView) constitute the complete MVP.
 
 ### Phase 2 (after MVP ships)
 - Plaid Link integration — **requires a Supabase backend** (access tokens must never live on-device; backend handles token exchange)
