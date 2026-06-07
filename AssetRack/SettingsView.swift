@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var currency: CurrencyService
 
+    @Environment(BiometricLockService.self) private var lockService
     @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
@@ -56,6 +57,23 @@ struct SettingsView: View {
                         Task { await currency.fetch() }
                     }
                     .disabled(currency.isLoading)
+                }
+
+                // MARK: Security
+                Section {
+                    @Bindable var lock = lockService
+                    Toggle(isOn: $lock.isEnabled) {
+                        Label(securityToggleLabel, systemImage: securityToggleIcon)
+                    }
+                    .disabled(!lockService.canUseLock)
+                } header: {
+                    Text("Security")
+                } footer: {
+                    if lockService.canUseLock {
+                        Text("Require authentication when returning to the app after it moves to the background.")
+                    } else {
+                        Text("Set up a passcode in iPhone Settings to enable the app lock.")
+                    }
                 }
 
                 // MARK: Integrations
@@ -154,6 +172,22 @@ struct SettingsView: View {
                     Text(importConfirmMessage(for: backup))
                 }
             }
+        }
+    }
+
+    private var securityToggleLabel: String {
+        switch lockService.biometryType {
+        case .faceID:   return "Face ID Lock"
+        case .touchID:  return "Touch ID Lock"
+        default:        return "Passcode Lock"
+        }
+    }
+
+    private var securityToggleIcon: String {
+        switch lockService.biometryType {
+        case .faceID:   return "faceid"
+        case .touchID:  return "touchid"
+        default:        return "lock.fill"
         }
     }
 

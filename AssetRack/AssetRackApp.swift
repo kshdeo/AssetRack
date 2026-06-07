@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct AssetRackApp: App {
     let container: ModelContainer
+    let lockService = BiometricLockService()
 
     init() {
         let schema = Schema([Account.self, Holding.self, BalanceSnapshot.self, NetWorthSnapshot.self, ProjectionSettings.self])
@@ -29,6 +30,7 @@ struct AssetRackApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(lockService)
         }
         .modelContainer(container)
     }
