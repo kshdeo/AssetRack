@@ -164,11 +164,11 @@ struct OnboardingPage: View {
 
             if !content.resolvedFeatures.isEmpty {
                 featureList
-                    .padding(.top, 28)
+                    .padding(.top, 24)
             }
 
-            Spacer(minLength: 32)
-            Spacer().frame(height: 120)   // clear space for the action chrome
+            Spacer(minLength: 24)
+            Spacer().frame(height: 112)   // clear space for the action chrome
         }
     }
 
@@ -177,13 +177,13 @@ struct OnboardingPage: View {
         switch content.hero {
         case let .symbol(name, gradient):
             Image(systemName: name)
-                .font(.system(size: 78, weight: .medium))
+                .font(.system(size: 70, weight: .medium))
                 .foregroundStyle(
                     LinearGradient(colors: gradient,
                                    startPoint: .topLeading,
                                    endPoint: .bottomTrailing)
                 )
-                .frame(width: 140, height: 140)
+                .frame(width: 130, height: 130)
                 .background(
                     Circle().fill(.background)
                         .shadow(color: gradient.first?.opacity(0.18) ?? .clear,
@@ -193,13 +193,13 @@ struct OnboardingPage: View {
     }
 
     private var featureList: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(content.resolvedFeatures) { f in
                 HStack(spacing: 14) {
                     Image(systemName: f.symbol)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(f.colour)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 34, height: 34)
                         .background(f.colour.opacity(0.14),
                                     in: RoundedRectangle(cornerRadius: 9))
                     Text(f.label)
