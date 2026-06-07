@@ -78,7 +78,8 @@ final class StatementScanner {
         var holdings: [Holding]
 
         struct Holding {
-            var tickerSymbol: String
+            var companyName: String?   // e.g. "NVIDIA Corp" — often the only reliable identifier
+            var tickerSymbol: String   // best-effort; may be derived from the company name
             var quantity: Double
             var lastPrice: Double?
             var priceCurrency: String?
@@ -205,28 +206,31 @@ extension StatementScanner {
         @Guide(description: "Account category. Must be one of exactly: checking, savings, brokerage, pension, realEstate, mortgage, creditCard, loan. Pick from page cues — 'savings' on the page → savings; credit limit + statement balance → creditCard; 'IRA'/'401k'/'pension' → pension. Null if uncertain.")
         let accountType: String?
 
-        @Guide(description: "Headline balance on the page. For cash accounts this is the current balance; for brokerage this is the portfolio value. Numeric only — no symbols, no thousands separators.")
+        @Guide(description: "Headline / total balance on the page as a plain decimal number. Strip currency symbols. Numbers may be in European format where '.' is the thousands separator and ',' is the decimal — e.g. '66.674,30' means 66674.30, and '28.773,15' means 28773.15.")
         let totalBalance: Double?
 
-        @Guide(description: "Cash / settlement balance shown on a brokerage page, if any. Numeric only.")
+        @Guide(description: "Cash / settlement / cash-compensation balance shown on a brokerage page, if any. Plain decimal number, same European-format handling as above. Null if none.")
         let cashBalance: Double?
 
-        @Guide(description: "Holdings list. Populate only for brokerage / pension pages that show individual positions. Leave empty array for cash accounts.")
+        @Guide(description: "Every individual position / holding listed on the page. Populate one entry per row for brokerage or pension pages. Empty array for cash accounts.")
         let holdings: [ExtractedHoldingSchema]
     }
 
     @Generable
     struct ExtractedHoldingSchema {
-        @Guide(description: "Ticker symbol exactly as shown (e.g. AAPL, VWRP.L, BRK.B).")
+        @Guide(description: "Full company / instrument name as shown, e.g. 'NVIDIA Corp', 'Marvell Technology Inc', 'iShares Core MSCI World'. This is the most reliable identifier — always capture it.")
+        let companyName: String
+
+        @Guide(description: "Stock ticker symbol. The screenshot may NOT show a real ticker — a short code like 'TDG', 'LSE', 'NASDAQ', 'L&S' next to a price is usually the EXCHANGE/VENUE, not the ticker, so ignore it. Instead derive the well-known ticker from the company name for major companies (NVIDIA Corp→NVDA, Intel Corp→INTC, Marvell Technology Inc→MRVL, Apple→AAPL). If you can't confidently map it, return an empty string.")
         let tickerSymbol: String
 
-        @Guide(description: "Number of shares or units held. Numeric only.")
+        @Guide(description: "Number of shares / units held. On rows formatted 'price × quantity' (e.g. '85,89 × 335'), the quantity is the number AFTER the × sign. Plain integer or decimal.")
         let quantity: Double
 
-        @Guide(description: "Last price per share if visible. Numeric only, no currency symbols.")
+        @Guide(description: "Price per single share / unit. On rows formatted 'price × quantity' (e.g. '85,89 × 335'), the price is the number BEFORE the × sign. European format: '85,89' means 85.89, '230,75' means 230.75. Do NOT use the position's total value here. Null if not visible.")
         let lastPrice: Double?
 
-        @Guide(description: "ISO 4217 currency for the price (USD, GBP, EUR…). Null if uncertain.")
+        @Guide(description: "ISO 4217 currency for the price (USD, GBP, EUR…). Map € → EUR, $ → USD, £ → GBP. Null if uncertain.")
         let priceCurrency: String?
     }
 
@@ -238,13 +242,22 @@ extension StatementScanner {
 
         Rules:
         - When a field is unclear or absent, return null. Never invent values.
-        - Strip currency symbols, commas, and units from numbers.
+        - NUMBER FORMAT: many statements use European formatting where '.' is the \
+          thousands separator and ',' is the decimal separator. '66.674,30' is \
+          66674.30; '28.773,15' is 28773.15; '85,89' is 85.89. Always output a \
+          plain decimal number (period as decimal point, no thousands separators).
         - `accountType` must be one of: checking, savings, brokerage, pension, \
-          realEstate, mortgage, creditCard, loan. Pick from visual / textual cues.
-        - For brokerage pages, populate `holdings` with each visible position. \
-          For cash pages, return an empty array.
-        - `totalBalance` is the headline balance (current balance for cash, \
-          portfolio value for brokerage).
+          realEstate, mortgage, creditCard, loan. Pick from visual / textual cues. \
+          A page listing shares / positions is `brokerage`.
+        - HOLDINGS: for brokerage / pension pages, output one entry per position \
+          row. Each row typically shows: company name, a 'price × quantity' pair \
+          (e.g. '85,89 × 335' → price 85.89, quantity 335), and the position's \
+          total value on the right. Capture price-per-share and quantity, NOT the \
+          total value. A short code like 'TDG'/'LSE'/'NASDAQ' beside the price is \
+          the exchange/venue, not a ticker — ignore it and derive the real ticker \
+          from the company name. For cash pages return an empty holdings array.
+        - `totalBalance` is the single headline balance at the top of the page \
+          (portfolio value for brokerage, current balance for cash).
         """
 
         let session = LanguageModelSession(instructions: instructions)
@@ -269,6 +282,7 @@ extension StatementScanner {
             cashBalance: raw.cashBalance,
             holdings: raw.holdings.map { h in
                 Extracted.Holding(
+                    companyName: h.companyName.trimmedNonEmpty,
                     tickerSymbol: h.tickerSymbol.trimmingCharacters(in: .whitespaces).uppercased(),
                     quantity: h.quantity,
                     lastPrice: h.lastPrice,

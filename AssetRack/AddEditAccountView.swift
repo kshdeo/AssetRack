@@ -309,8 +309,15 @@ struct AddEditAccountView: View {
                 cashBalanceText = String(format: "%.2f", cash)
             }
             for h in extracted.holdings {
+                // Prefer the model's derived ticker; fall back to the company
+                // name so the row is never blank. Either way the user can fix
+                // it with the existing ticker autocomplete before saving.
+                let symbol = h.tickerSymbol.isEmpty ? (h.companyName ?? "") : h.tickerSymbol
+                // Skip rows that carry no identifier and no quantity — OCR
+                // noise occasionally yields an empty position.
+                guard !symbol.isEmpty || h.quantity > 0 else { continue }
                 let draft = HoldingDraft(
-                    tickerSymbol: h.tickerSymbol,
+                    tickerSymbol: symbol,
                     quantity: h.quantity,
                     priceSource: .yahooFinance,
                     lastPrice: h.lastPrice ?? 0,
