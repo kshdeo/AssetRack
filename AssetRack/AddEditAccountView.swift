@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 // MARK: - Add / Edit Account
 
@@ -23,6 +24,17 @@ struct AddEditAccountView: View {
     @State private var holdingToEdit: HoldingDraft?
     @State private var showingDeleteConfirm = false
     @State private var showingBalanceHistory = false
+
+    // MARK: Scan-statement state
+    //
+    // Only used in the "add" flow — editing an existing account keeps its
+    // values. `pendingScanItem` is what `PhotosPicker` writes into; the
+    // `.task(id:)` modifier reacts to changes and runs the scanner.
+    @State private var scanner = StatementScanner()
+    @State private var pendingScanItem: PhotosPickerItem?
+    @State private var isScanning = false
+    @State private var scanError: String?
+    @State private var scanSummary: String?
 
     struct HoldingDraft: Identifiable {
         var id = UUID()
@@ -88,6 +100,10 @@ struct AddEditAccountView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !isEditing {
+                    scanSection
+                }
+
                 Section("Account Type") {
                     accountTypePicker
                 }
@@ -152,6 +168,14 @@ struct AddEditAccountView: View {
                     AccountBalanceHistoryView(account: account, currencyService: cs)
                 }
             }
+            // PhotosPicker writes the selection into `pendingScanItem`. We
+            // react to changes via `.task(id:)` instead of `.onChange` so the
+            // scan runs in a structured Task that cancels cleanly if the user
+            // dismisses the sheet mid-OCR.
+            .task(id: pendingScanItem) {
+                guard let item = pendingScanItem else { return }
+                await performScan(item)
+            }
         }
         .onAppear {
             prefill()
@@ -159,6 +183,161 @@ struct AddEditAccountView: View {
                 Task { await ts.fetch(context: modelContext, currency: currencyService ?? CurrencyService()) }
             }
         }
+    }
+
+    // MARK: - Scan section
+
+    /// "Magic" entry point at the top of the form. PhotosPicker handles the
+    /// image source; we surface progress and any errors inline so the user
+    /// never leaves this screen during the scan. When the on-device model
+    /// isn't ready (older OS, Apple Intelligence disabled, etc) we still
+    /// show the row but disable it with the reason — easier to debug than a
+    /// silently-missing entry point.
+    private var scanSection: some View {
+        Section {
+            let isReady = scanner.availability.isReady
+            PhotosPicker(selection: $pendingScanItem, matching: .images, photoLibrary: .shared()) {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles.rectangle.stack")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            LinearGradient(colors: isReady ? [.blue, .purple] : [.gray.opacity(0.6), .gray.opacity(0.4)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 9)
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isScanning ? "Scanning…" : "Scan statement")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(isReady ? .primary : .secondary)
+                        Text(scanSubtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isScanning {
+                        ProgressView()
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .disabled(isScanning || !isReady)
+
+            if let summary = scanSummary {
+                Label(summary, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+            if let error = scanError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } footer: {
+            Text("Runs entirely on your device. The image never leaves your phone.")
+        }
+    }
+
+    /// Subtitle shown under the scan-statement row. Surfaces *why* the button
+    /// is disabled instead of silently hiding it. Each branch is actionable —
+    /// the user can read it and know exactly what to do.
+    private var scanSubtitle: String {
+        switch scanner.availability {
+        case .available:
+            return "Pre-fill from a screenshot of your bank or brokerage app"
+        case .preparing(let reason):
+            return reason
+        case .unsupportedDevice:
+            return "This device or iOS version doesn't support Apple Intelligence"
+        case .appleIntelligenceDisabled:
+            return "Enable Apple Intelligence in Settings → Apple Intelligence & Siri"
+        case .otherUnavailable(let reason):
+            return "Apple Intelligence unavailable: \(reason)"
+        }
+    }
+
+    /// Load the picked photo, hand it to the scanner, and merge results into
+    /// the form. Clears `pendingScanItem` on completion so re-selecting the
+    /// same image re-runs the scan.
+    private func performScan(_ item: PhotosPickerItem) async {
+        isScanning = true
+        scanError = nil
+        scanSummary = nil
+        defer {
+            isScanning = false
+            pendingScanItem = nil
+        }
+
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                scanError = "Couldn't load that image."
+                return
+            }
+            let extracted = try await scanner.scan(image: image)
+            applyScan(extracted)
+        } catch let error as StatementScanner.ScanError {
+            scanError = error.errorDescription
+        } catch {
+            scanError = error.localizedDescription
+        }
+    }
+
+    /// Merge extracted fields into the form. We only overwrite fields the
+    /// user hasn't already filled in, so a partial second scan doesn't blow
+    /// away their edits. The type picker is the exception — if the model is
+    /// confident enough to return a type, trust it (the user picked Scan to
+    /// avoid setting things by hand).
+    private func applyScan(_ extracted: StatementScanner.Extracted) {
+        if let type = extracted.accountType {
+            selectedType = type
+        }
+        if name.trimmingCharacters(in: .whitespaces).isEmpty, let accountName = extracted.accountName {
+            name = accountName
+        }
+        if institution.trimmingCharacters(in: .whitespaces).isEmpty, let inst = extracted.institution {
+            institution = inst
+        }
+        if let code = extracted.currency, let currency = Currency(rawValue: code) {
+            selectedCurrency = currency
+        }
+
+        if selectedType.supportsHoldings {
+            if let cash = extracted.cashBalance {
+                cashBalanceText = String(format: "%.2f", cash)
+            }
+            for h in extracted.holdings {
+                let draft = HoldingDraft(
+                    tickerSymbol: h.tickerSymbol,
+                    quantity: h.quantity,
+                    priceSource: .yahooFinance,
+                    lastPrice: h.lastPrice ?? 0,
+                    priceCurrency: h.priceCurrency ?? selectedCurrency.code
+                )
+                holdings.append(draft)
+            }
+        } else if let total = extracted.totalBalance {
+            balanceText = String(format: "%.2f", total)
+        }
+
+        scanSummary = summary(for: extracted)
+    }
+
+    /// Short user-facing recap of what filled in, so the user can see the
+    /// scan worked without having to re-check every field.
+    private func summary(for extracted: StatementScanner.Extracted) -> String {
+        var parts: [String] = []
+        if let inst = extracted.institution { parts.append(inst) }
+        if let total = extracted.totalBalance {
+            parts.append(String(format: "%.2f %@", total, extracted.currency ?? selectedCurrency.code))
+        }
+        if !extracted.holdings.isEmpty {
+            parts.append("\(extracted.holdings.count) holdings")
+        }
+        guard !parts.isEmpty else { return "Scan complete — review fields below." }
+        return "Scanned: " + parts.joined(separator: " · ")
     }
 
     // MARK: - Holdings Section
