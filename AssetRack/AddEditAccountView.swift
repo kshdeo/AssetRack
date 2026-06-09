@@ -7,6 +7,7 @@ import PhotosUI
 struct AddEditAccountView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     var editingAccount: Account?
     var tickerService: TickerService?
@@ -349,6 +350,20 @@ struct AddEditAccountView: View {
 
     // MARK: - Holdings Section
 
+    /// Open a holding's symbol in the Apple Stocks app via its universal link.
+    /// `https://stocks.apple.com/symbol/<TICKER>` deep-links straight to the
+    /// symbol's page (and falls back to in-app search if it's unrecognised).
+    /// No-op for rows whose symbol is blank or a multi-word company-name
+    /// fallback (scanned rows the user hasn't resolved to a ticker yet).
+    private func openInStocks(_ draft: HoldingDraft) {
+        let symbol = draft.tickerSymbol.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !symbol.isEmpty, !symbol.contains(" "),
+              let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://stocks.apple.com/symbol/\(encoded)")
+        else { return }
+        openURL(url)
+    }
+
     private var holdingsSection: some View {
         Group {
             Section {
@@ -357,13 +372,25 @@ struct AddEditAccountView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(holdings) { draft in
-                        Button { holdingToEdit = draft } label: {
-                            HoldingDraftRow(draft: draft)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .onDelete { indices in
-                        holdings.remove(atOffsets: indices)
+                        HoldingDraftRow(draft: draft)
+                            .contentShape(Rectangle())
+                            // Tap opens the symbol in Apple Stocks; editing
+                            // moves to a swipe action so the primary gesture
+                            // is the quick "check the quote" path.
+                            .onTapGesture { openInStocks(draft) }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    holdings.removeAll { $0.id == draft.id }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                Button {
+                                    holdingToEdit = draft
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
                     }
                 }
 
