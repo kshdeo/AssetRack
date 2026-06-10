@@ -14,7 +14,7 @@ struct AddHistoricalEntryView: View {
     private var liveTotal: Double {
         let amounts: [Money] = accounts.compactMap { account in
             guard let text = balanceTexts[account.id],
-                  let value = Double(text.replacingOccurrences(of: ",", with: "")) else { return nil }
+                  let value = NumberParsing.userNumber(text) else { return nil }
             let signed = account.isLiability ? -value : value
             return Money(signed, account.currency)
         }
@@ -90,7 +90,7 @@ struct AddHistoricalEntryView: View {
             let balance = account.balanceHistory
                 .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
                 .max(by: { $0.recordedAt < $1.recordedAt })?.balance ?? 0
-            balanceTexts[account.id] = String(format: "%.2f", balance)
+            balanceTexts[account.id] = NumberParsing.editableString(balance)
         }
     }
 
@@ -102,7 +102,7 @@ struct AddHistoricalEntryView: View {
 
         for account in accounts {
             guard let text = balanceTexts[account.id],
-                  let value = Double(text.replacingOccurrences(of: ",", with: "")) else { continue }
+                  let value = NumberParsing.userNumber(text) else { continue }
             account.setBalanceSnapshot(balance: value, at: noon)
         }
         // Keep currentBalance in sync with the latest snapshot we just wrote.

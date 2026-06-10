@@ -106,12 +106,12 @@ struct EditBalanceSnapshotView: View {
         }
         .onAppear {
             date = snapshot.recordedAt
-            balanceText = String(format: "%.2f", snapshot.balance)
+            balanceText = NumberParsing.editableString(snapshot.balance)
         }
     }
 
     private var parsedBalance: Double? {
-        Double(balanceText.replacingOccurrences(of: ",", with: ""))
+        NumberParsing.userNumber(balanceText)
     }
 
     private func save() {

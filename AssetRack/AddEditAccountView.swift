@@ -54,19 +54,11 @@ struct AddEditAccountView: View {
     private var isEditing: Bool { editingAccount != nil }
 
     private var parsedBalance: Double? {
-        let cleaned = balanceText
-            .replacingOccurrences(of: ",", with: "")
-            .replacingOccurrences(of: "$", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        return Double(cleaned)
+        NumberParsing.userNumber(balanceText)
     }
 
     private var parsedCashBalance: Double {
-        let cleaned = cashBalanceText
-            .replacingOccurrences(of: ",", with: "")
-            .replacingOccurrences(of: "$", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        return Double(cleaned) ?? 0
+        NumberParsing.userNumber(cashBalanceText) ?? 0
     }
 
     private var holdingsTotal: String {
@@ -307,7 +299,7 @@ struct AddEditAccountView: View {
 
         if selectedType.supportsHoldings {
             if let cash = extracted.cashBalance {
-                cashBalanceText = String(format: "%.2f", cash)
+                cashBalanceText = NumberParsing.editableString(cash)
             }
             for h in extracted.holdings {
                 // Prefer the model's derived ticker; fall back to the company
@@ -327,7 +319,7 @@ struct AddEditAccountView: View {
                 holdings.append(draft)
             }
         } else if let total = extracted.totalBalance {
-            balanceText = String(format: "%.2f", total)
+            balanceText = NumberParsing.editableString(total)
         }
 
         scanSummary = summary(for: extracted)
@@ -575,13 +567,13 @@ struct AddEditAccountView: View {
         selectedCurrency = Currency(rawValue: account.currency) ?? .usd
 
         if account.type.supportsHoldings {
-            cashBalanceText = account.cashBalance > 0 ? String(format: "%.2f", account.cashBalance) : ""
+            cashBalanceText = account.cashBalance > 0 ? NumberParsing.editableString(account.cashBalance) : ""
             holdings = account.holdings.map {
                 HoldingDraft(tickerSymbol: $0.tickerSymbol, quantity: $0.quantity,
                              priceSource: $0.priceSource, isin: $0.isin, existingHolding: $0)
             }
         } else {
-            balanceText = String(format: "%.2f", account.currentBalance)
+            balanceText = NumberParsing.editableString(account.currentBalance)
         }
     }
 
@@ -803,7 +795,7 @@ struct AddHoldingView: View {
 
     private let lookupService = ISINLookupService()
 
-    private var parsedQuantity: Double? { Double(quantityText) }
+    private var parsedQuantity: Double? { NumberParsing.userNumber(quantityText) }
     private var canSave: Bool {
         guard parsedQuantity != nil,
               !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty else { return false }

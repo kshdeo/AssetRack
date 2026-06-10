@@ -466,7 +466,7 @@ struct HistoryDayDetailView: View {
         if date != entry.date { return true }
         return editableRows.contains { row in
             guard let text = balanceTexts[row.id],
-                  let value = Double(text.replacingOccurrences(of: ",", with: "")) else { return false }
+                  let value = NumberParsing.userNumber(text) else { return false }
             return value != row.balance
         }
     }
@@ -477,7 +477,7 @@ struct HistoryDayDetailView: View {
             if row.isCarriedForward {
                 balance = row.balance
             } else if let text = balanceTexts[row.id],
-                      let value = Double(text.replacingOccurrences(of: ",", with: "")) {
+                      let value = NumberParsing.userNumber(text) {
                 balance = value
             } else {
                 balance = row.balance
@@ -546,7 +546,7 @@ struct HistoryDayDetailView: View {
         }
         .onAppear {
             for row in editableRows {
-                balanceTexts[row.id] = String(format: "%.2f", row.balance)
+                balanceTexts[row.id] = NumberParsing.editableString(row.balance)
             }
         }
     }
@@ -556,7 +556,7 @@ struct HistoryDayDetailView: View {
         for row in editableRows {
             guard let snapshot = row.snapshot else { continue }
             if let text = balanceTexts[row.id],
-               let value = Double(text.replacingOccurrences(of: ",", with: "")) {
+               let value = NumberParsing.userNumber(text) {
                 snapshot.balance = value
             }
             // Preserve time-of-day, only shift the calendar date
