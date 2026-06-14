@@ -366,10 +366,11 @@ struct AddEditAccountView: View {
                     ForEach(holdings) { draft in
                         HoldingDraftRow(draft: draft)
                             .contentShape(Rectangle())
-                            // Tap opens the symbol in Apple Stocks; editing
-                            // moves to a swipe action so the primary gesture
-                            // is the quick "check the quote" path.
-                            .onTapGesture { openInStocks(draft) }
+                            // Single tap edits; double tap opens the symbol in
+                            // Apple Stocks. (Double-tap handler is declared
+                            // first so it wins over the single-tap handler.)
+                            .onTapGesture(count: 2) { openInStocks(draft) }
+                            .onTapGesture { holdingToEdit = draft }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     holdings.removeAll { $0.id == draft.id }
