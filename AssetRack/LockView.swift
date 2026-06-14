@@ -45,6 +45,10 @@ struct LockView: View {
             .padding(.horizontal, 40)
             .padding(.bottom, 60)
         }
+        // Fill the whole window with an opaque background so nothing underneath
+        // shows through while locked.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground).ignoresSafeArea())
         .task {
             // Auto-prompt on appearance — covers both cold launch and
             // returning from background.

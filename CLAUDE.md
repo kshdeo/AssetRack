@@ -230,7 +230,7 @@ let lockService = BiometricLockService()
 // ...
 ContentView().environment(lockService)
 ```
-`ContentView` reads `lockService.isLocked` and shows `LockView` when true. It calls `lockService.lockIfEnabled()` in `.onChange(of: scenePhase)` when the app moves to `.background`. `LockView` auto-triggers `authenticate()` via `.task` on appear. Settings reads the service from environment to toggle `isEnabled`.
+`ContentView` calls `lockService.lockIfEnabled()` in `.onChange(of: scenePhase)` when the app moves to `.background`, and applies `.lockOverlay(lockService)`. The lock screen is presented in a **separate top-level `UIWindow`** (`LockOverlay.swift`, `LockWindowManager`) at `.alert` level — NOT by swapping ContentView's root. This is deliberate: a root swap tears down any open `.sheet` (e.g. the Add Account form) and all its in-progress state; the overlay window floats above the main window and any sheets, so unlocking reveals the app exactly where the user left it. `LockView` fills the window with an opaque background and auto-triggers `authenticate()` via `.task` on appear. Settings reads the service from environment to toggle `isEnabled`.
 
 ### StatementScanner
 Two-stage pipeline, iOS 26+ only:
