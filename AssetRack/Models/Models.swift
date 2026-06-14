@@ -38,7 +38,7 @@ enum AccountType: String, CaseIterable, Codable {
 
     var isLiability: Bool { category == .liabilities }
 
-    var supportsHoldings: Bool { self == .brokerage }
+    var supportsHoldings: Bool { self == .brokerage || self == .pension }
 
     var systemImage: String {
         switch self {
@@ -204,6 +204,14 @@ final class Account: Identifiable {
     /// Pass a `convert` closure to apply FX; defaults to no conversion (same-currency assumption).
     func recomputeBalance(convert: (Double, String, String) -> Double = { amount, _, _ in amount }) {
         guard type.supportsHoldings else { return }
+        // A holdings-capable account with NO holdings (e.g. a pension tracked as
+        // a single value) keeps its value in `currentBalance`/`cashBalance`.
+        // Never zero it out from an empty holdings list — that wipes manually
+        // entered balances.
+        guard !holdings.isEmpty else {
+            if cashBalance > 0 { currentBalance = cashBalance }
+            return
+        }
         currentBalance = holdings.reduce(0) { sum, holding in
             sum + convert(holding.value, holding.priceCurrency, currency)
         } + cashBalance
@@ -368,6 +376,7 @@ extension ModelContext {
         if total > 0 { try? save() }
         return total
     }
+
 }
 
 // MARK: - Formatting helpers

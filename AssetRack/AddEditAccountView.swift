@@ -432,7 +432,7 @@ struct AddEditAccountView: View {
             } header: {
                 Text("Cash Balance")
             } footer: {
-                Text("Cash held in this brokerage account, separate from your holdings.")
+                Text("Cash held in this account, separate from your holdings.")
             }
 
             if showHoldingsTotal {
@@ -567,7 +567,12 @@ struct AddEditAccountView: View {
         selectedCurrency = Currency(rawValue: account.currency) ?? .usd
 
         if account.type.supportsHoldings {
-            cashBalanceText = account.cashBalance > 0 ? NumberParsing.editableString(account.cashBalance) : ""
+            // Prefer the explicit cash balance; otherwise (e.g. a pension
+            // tracked as a single value with no holdings) fall back to the
+            // account's current balance so the value is shown, not 0.
+            let cashValue = account.cashBalance > 0 ? account.cashBalance
+                : (account.holdings.isEmpty ? account.currentBalance : 0)
+            cashBalanceText = cashValue > 0 ? NumberParsing.editableString(cashValue) : ""
             holdings = account.holdings.map {
                 HoldingDraft(tickerSymbol: $0.tickerSymbol, quantity: $0.quantity,
                              priceSource: $0.priceSource, isin: $0.isin, existingHolding: $0)
@@ -808,13 +813,19 @@ struct AddHoldingView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Source picker
+                // Price source — segmented, with an explanatory caption.
                 Section {
                     Picker("Price source", selection: $priceSource) {
                         ForEach(PriceSource.allCases, id: \.self) { source in
                             Text(source.displayName).tag(source)
                         }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                } footer: {
+                    Text(sourceCaption)
                 }
                 .onChange(of: priceSource) { _, _ in
                     searchResults = []
@@ -822,22 +833,13 @@ struct AddHoldingView: View {
                     searchError = nil
                 }
 
-                if priceSource == .tradegate {
-                    tradegateSections
-                } else {
-                    yahooSection
-                }
-
-                // Quantity
-                Section {
-                    HStack {
-                        TextField("Number of shares", text: $quantityText)
-                            .keyboardType(.decimalPad)
-                        Text("shares")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                searchSection
+                searchResultsSection
+                tickerQuantitySection
             }
+            // Trim the default gap above the first section — the segmented
+            // control sat too far below the navigation bar.
+            .contentMargins(.top, 8, for: .scrollContent)
             .onChange(of: tickerSymbol) { _, _ in
                 if priceSource == .yahooFinance { schedulePricePreview(debounce: true) }
             }
@@ -869,44 +871,75 @@ struct AddHoldingView: View {
         }
     }
 
-    // MARK: - Yahoo Finance section
+    private var hasTicker: Bool {
+        !tickerSymbol.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
-    @ViewBuilder
-    private var yahooSection: some View {
-        searchSection
-        searchResultsSection
-        Section {
-            TextField("Ticker symbol (e.g. VOO, AAPL, BTC-USD)", text: $tickerSymbol)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.characters)
-            pricePreviewRow
-        } header: {
-            Text("Ticker")
-        } footer: {
-            Text("Use Yahoo Finance symbols, or use search above. Crypto: BTC-USD, ETH-USD.")
+    /// Caption under the segmented source control explaining the active source.
+    private var sourceCaption: String {
+        switch priceSource {
+        case .yahooFinance:
+            return "Yahoo Finance — global stocks, ETFs and crypto (e.g. AAPL, VOO, BTC-USD)."
+        case .tradegate:
+            return "Tradegate — European exchange, prices in EUR. Identified by ISIN."
         }
     }
 
-    // MARK: - Tradegate sections
+    // MARK: - Ticker + quantity
 
-    @ViewBuilder
-    private var tradegateSections: some View {
-        searchSection
-        searchResultsSection
+    /// Ticker and quantity share one row; quantity stays hidden until a ticker
+    /// is set (typed or picked from search), so the form starts minimal. The
+    /// live total appears as soon as a quantity and a preview price are known.
+    private var tickerQuantitySection: some View {
         Section {
-            HStack {
-                TextField("Ticker / name (e.g. VOW3)", text: $tickerSymbol)
+            HStack(spacing: 12) {
+                TextField(tickerPlaceholder, text: $tickerSymbol)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.characters)
+
+                if hasTicker {
+                    Text("×")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextField("Quantity", text: $quantityText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
+            if priceSource == .tradegate {
+                TextField("ISIN (e.g. DE0007664039)", text: $isin)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.characters)
             }
-            TextField("ISIN (e.g. DE0007664039)", text: $isin)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.characters)
+
             pricePreviewRow
+            totalRow
         } header: {
-            Text("Details")
+            Text(priceSource == .tradegate ? "Holding" : "Ticker")
         } footer: {
-            Text("Prices fetched from Tradegate Exchange in EUR.")
+            Text(tickerFooter)
+        }
+    }
+
+    private var tickerPlaceholder: String {
+        priceSource == .tradegate ? "Ticker / name (e.g. VOW3)" : "Ticker (e.g. AAPL)"
+    }
+
+    private var tickerFooter: String {
+        priceSource == .tradegate
+            ? "Search above, or enter the ISIN directly. Prices in EUR."
+            : "Search above, or type a Yahoo symbol. Crypto: BTC-USD, ETH-USD."
+    }
+
+    /// Live total = preview price × quantity, shown the moment both are known.
+    @ViewBuilder
+    private var totalRow: some View {
+        if let qty = parsedQuantity, qty > 0, let preview = pricePreview {
+            LabeledContent("Total") {
+                Text((preview.price * qty).currencyFormatted(code: preview.currency, fractionDigits: 2))
+                    .fontWeight(.semibold)
+            }
         }
     }
 
