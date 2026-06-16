@@ -99,11 +99,19 @@ final class StatementScanner {
     /// full `Extracted` (with optionals where the model couldn't decide) or
     /// an error they can show in the UI.
     func scan(image: UIImage) async throws -> Extracted {
+        print("[StatementScanner] scan() started — image \(Int(image.size.width))×\(Int(image.size.height))")
         let text = try await runOCR(on: image)
+        print("[StatementScanner] OCR text (\(text.count) chars):\n----- OCR START -----\n\(text)\n----- OCR END -----")
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("[StatementScanner] OCR returned empty text — aborting")
             throw ScanError.ocrFailed
         }
-        return try await runExtraction(on: text)
+        let result = try await runExtraction(on: text)
+        print("[StatementScanner] extraction complete — institution=\(result.institution ?? "nil"), type=\(result.accountType?.rawValue ?? "nil"), total=\(result.totalBalance.map { String($0) } ?? "nil"), holdings=\(result.holdings.count)")
+        for h in result.holdings {
+            print("[StatementScanner]   holding: name=\(h.companyName ?? "nil") ticker=\(h.tickerSymbol) qty=\(h.quantity) price=\(h.lastPrice.map { String($0) } ?? "nil") \(h.priceCurrency ?? "")")
+        }
+        return result
     }
 
     // MARK: - Stage 1: OCR via Vision
@@ -262,12 +270,16 @@ extension StatementScanner {
 
         let session = LanguageModelSession(instructions: instructions)
         do {
+            print("[StatementScanner] sending \(ocrText.count) chars to FoundationModels…")
             let response = try await session.respond(
                 to: "Extract account details from this screenshot text:\n\n\(ocrText)",
                 generating: ExtractedAccountSchema.self
             )
-            return normalise(response.content)
+            let raw = response.content
+            print("[StatementScanner] raw model response: institution=\(raw.institution ?? "nil"), accountName=\(raw.accountName ?? "nil"), currency=\(raw.currency ?? "nil"), type=\(raw.accountType ?? "nil"), total=\(raw.totalBalance.map { String($0) } ?? "nil"), cash=\(raw.cashBalance.map { String($0) } ?? "nil"), holdings=\(raw.holdings.count)")
+            return normalise(raw)
         } catch {
+            print("[StatementScanner] FoundationModels error: \(error)")
             throw ScanError.extractionFailed(error.localizedDescription)
         }
     }
