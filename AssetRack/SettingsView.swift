@@ -20,6 +20,12 @@ struct SettingsView: View {
     @State private var importError: String?
     @State private var showingImportConfirm = false
 
+    // CSV import
+    @State private var showingCSVPicker = false
+    @State private var pendingCSV: CSVImportResult?
+    @State private var csvError: String?
+    @State private var showingCSVConfirm = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -115,10 +121,21 @@ struct SettingsView: View {
                     if let error = importError {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
+
+                    // Import from CSV
+                    Button {
+                        showingCSVPicker = true
+                    } label: {
+                        Label("Import from CSV", systemImage: "tablecells")
+                    }
+
+                    if let error = csvError {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Export saves your accounts, holdings, balance history, net-worth history, and projection assumptions to a JSON file. Import replaces all existing data.")
+                    Text("Export saves your accounts, holdings, balance history, net-worth history, and projection assumptions to a JSON file. Import replaces all existing data.\n\nImport from CSV adds accounts and holdings from a spreadsheet. Each row is an account (name, type, balance) or a holding (symbol, quantity, price); holdings attach to the account named in their row or the account row above them.")
                 }
 
                 // MARK: About
@@ -170,6 +187,26 @@ struct SettingsView: View {
             } message: {
                 if let backup = pendingBackup {
                     Text(importConfirmMessage(for: backup))
+                }
+            }
+            // File picker for CSV import
+            .fileImporter(
+                isPresented: $showingCSVPicker,
+                allowedContentTypes: [.commaSeparatedText, .plainText],
+                allowsMultipleSelection: false
+            ) { result in
+                handleCSVPick(result)
+            }
+            // Confirmation before adding CSV data (additive, not destructive)
+            .confirmationDialog(
+                "Import from CSV?",
+                isPresented: $showingCSVConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Add to my accounts") { commitCSVImport() }
+            } message: {
+                if let csv = pendingCSV {
+                    Text(csvConfirmMessage(for: csv))
                 }
             }
         }
@@ -337,6 +374,57 @@ struct SettingsView: View {
         } catch {
             importError = "Import failed: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - CSV import
+
+    private func csvConfirmMessage(for csv: CSVImportResult) -> String {
+        var parts = ["\(csv.accountCount) accounts"]
+        if csv.holdingCount > 0 { parts.append("\(csv.holdingCount) holdings") }
+        var msg = "This will add \(parts.joined(separator: " and ")) to your existing data."
+        if !csv.warnings.isEmpty {
+            let shown = csv.warnings.prefix(3).joined(separator: "\n")
+            let extra = csv.warnings.count > 3 ? "\n…and \(csv.warnings.count - 3) more." : ""
+            msg += "\n\nNotes:\n\(shown)\(extra)"
+        }
+        return msg
+    }
+
+    private func handleCSVPick(_ result: Result<[URL], Error>) {
+        csvError = nil
+        do {
+            let urls = try result.get()
+            guard let url = urls.first else { return }
+            guard url.startAccessingSecurityScopedResource() else {
+                csvError = "Could not access the selected file."
+                return
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8)
+                    ?? String(data: data, encoding: .isoLatin1) else {
+                csvError = "Could not read the file as text."
+                return
+            }
+            let parsed = try CSVAccountImporter.parse(text, defaultCurrency: currency.baseCurrency)
+            guard parsed.accountCount > 0 else {
+                csvError = "No accounts or holdings found in the file."
+                return
+            }
+            pendingCSV = parsed
+            showingCSVConfirm = true
+        } catch let error as CSVImportError {
+            csvError = error.errorDescription
+        } catch {
+            csvError = "Could not read file: \(error.localizedDescription)"
+        }
+    }
+
+    private func commitCSVImport() {
+        guard let parsed = pendingCSV else { return }
+        csvError = nil
+        CSVAccountImporter.commit(parsed, into: modelContext, currency: currency)
+        pendingCSV = nil
     }
 }
 

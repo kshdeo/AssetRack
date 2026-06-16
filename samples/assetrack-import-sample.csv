@@ -1,0 +1,11 @@
+name,type,institution,currency,balance,symbol,quantity,price,isin,source
+Everyday Checking,checking,Barclays,GBP,4250.75,,,,,
+Rainy Day Savings,savings,Marcus,GBP,18000,,,,,
+Home,real estate,,GBP,510000,,,,,
+Mortgage,mortgage,Nationwide,GBP,288400,,,,,
+My ISA,brokerage,Trading 212,GBP,,,,,,
+,,,,,VWRP.L,42,108.4,,yahoo
+,,,,,AAPL,15,191.2,,yahoo
+Workplace Pension,pension,Aviva,GBP,96500,,,,,
+US Brokerage,brokerage,Schwab,USD,,NVDA,12,178.04,,yahoo
+US Brokerage,brokerage,Schwab,USD,,INTC,30,85.89,,yahoo
