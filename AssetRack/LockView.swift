@@ -49,11 +49,6 @@ struct LockView: View {
         // shows through while locked.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground).ignoresSafeArea())
-        .task {
-            // Auto-prompt on appearance — covers both cold launch and
-            // returning from background.
-            await lockService.authenticate()
-        }
     }
 
     private var biometryIcon: String {
