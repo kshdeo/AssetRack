@@ -8,6 +8,8 @@ final class TickerService {
     private(set) var lastFetched: Date?
     private(set) var errors: [String: String] = [:]
 
+    static let refreshIntervalKey = "ticker_refresh_interval_minutes"
+
     private let fetchedAtKey = "ticker_last_fetched"
     private var crumb: String?
 
@@ -145,7 +147,9 @@ final class TickerService {
 
     private var shouldFetch: Bool {
         guard let last = lastFetched else { return true }
-        return Date().timeIntervalSince(last) > 3_600
+        let minutes = UserDefaults.standard.integer(forKey: Self.refreshIntervalKey)
+        let interval = TimeInterval(minutes > 0 ? minutes : 60) * 60
+        return Date().timeIntervalSince(last) > interval
     }
 
     private func fetchCrumb() async throws -> String {

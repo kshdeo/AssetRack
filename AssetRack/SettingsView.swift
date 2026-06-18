@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Bindable var currency: CurrencyService
 
     @Environment(BiometricLockService.self) private var lockService
+    @AppStorage(TickerService.refreshIntervalKey) private var refreshIntervalMinutes = 60
     @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
@@ -63,6 +64,23 @@ struct SettingsView: View {
                         Task { await currency.fetch() }
                     }
                     .disabled(currency.isLoading)
+                }
+
+                // MARK: Prices
+                Section {
+                    Picker("Refresh every", selection: $refreshIntervalMinutes) {
+                        Text("1 min").tag(1)
+                        Text("5 min").tag(5)
+                        Text("15 min").tag(15)
+                        Text("30 min").tag(30)
+                        Text("1 hour").tag(60)
+                        Text("2 hours").tag(120)
+                        Text("4 hours").tag(240)
+                    }
+                } header: {
+                    Text("Prices")
+                } footer: {
+                    Text("How often to refresh stock and fund prices when you open the app. Pull down on the dashboard to refresh immediately.")
                 }
 
                 // MARK: Security
