@@ -210,7 +210,14 @@ struct NetWorthWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NetWorthProvider()) { entry in
             NetWorthWidgetEntryView(entry: entry)
-                .containerBackground(for: .widget) { widgetGradient() }
+                .containerBackground(for: .widget) {
+                    LinearGradient(
+                        colors: [Color(red: 0.09, green: 0.12, blue: 0.22),
+                                 Color(red: 0.06, green: 0.08, blue: 0.16)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
         }
         .configurationDisplayName("Net Worth")
         .description("Your current net worth and today's change.")
