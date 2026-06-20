@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Shared data
 
-private let appGroupID = "group.com.blackforestapps.assetsRack"
+private let appGroupID = "group.blackforestapps.assetsRack"
 
 private struct WidgetEntry: TimelineEntry {
     let date: Date
@@ -34,7 +34,6 @@ private struct NetWorthProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
         let current = entry()
-        // Refresh once an hour so the "updated X ago" label stays fresh
         let nextRefresh = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
         completion(Timeline(entries: [current], policy: .after(nextRefresh)))
     }
@@ -51,6 +50,19 @@ private struct NetWorthProvider: TimelineProvider {
     }
 }
 
+// MARK: - Background gradient
+
+// Concrete return type (LinearGradient) satisfies both View (.background)
+// and ShapeStyle (.containerBackground) without type-erasing to some View.
+private func widgetGradient() -> LinearGradient {
+    LinearGradient(
+        colors: [Color(red: 0.09, green: 0.12, blue: 0.22),
+                 Color(red: 0.06, green: 0.08, blue: 0.16)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
 // MARK: - Views
 
 private struct SmallWidgetView: View {
@@ -62,7 +74,7 @@ private struct SmallWidgetView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.7))
 
-            Text(entry.netWorth.currencyFormatted(code: entry.currency))
+            Text(entry.netWorth.widgetFormatted(code: entry.currency))
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.white)
                 .minimumScaleFactor(0.6)
@@ -73,7 +85,7 @@ private struct SmallWidgetView: View {
             HStack(spacing: 4) {
                 Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
                     .font(.caption2.weight(.semibold))
-                Text(abs(entry.dailyChange).currencyFormatted(code: entry.currency))
+                Text(abs(entry.dailyChange).widgetFormatted(code: entry.currency))
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -88,7 +100,7 @@ private struct SmallWidgetView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(backgroundGradient)
+        .background(widgetGradient())
     }
 }
 
@@ -97,13 +109,12 @@ private struct MediumWidgetView: View {
 
     var body: some View {
         HStack(alignment: .center) {
-            // Left: label + net worth
             VStack(alignment: .leading, spacing: 4) {
                 Text("Net Worth")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.7))
 
-                Text(entry.netWorth.currencyFormatted(code: entry.currency))
+                Text(entry.netWorth.widgetFormatted(code: entry.currency))
                     .font(.title.weight(.bold))
                     .foregroundStyle(.white)
                     .minimumScaleFactor(0.5)
@@ -118,13 +129,12 @@ private struct MediumWidgetView: View {
 
             Spacer()
 
-            // Right: daily change pill
             VStack(alignment: .trailing, spacing: 6) {
                 HStack(spacing: 4) {
                     Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
                         .font(.caption.weight(.bold))
                     Text(entry.dailyChange >= 0 ? "+" : "")
-                    + Text(abs(entry.dailyChange).currencyFormatted(code: entry.currency))
+                    + Text(abs(entry.dailyChange).widgetFormatted(code: entry.currency))
                 }
                 .font(.subheadline.weight(.semibold))
                 .minimumScaleFactor(0.6)
@@ -144,7 +154,7 @@ private struct MediumWidgetView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(backgroundGradient)
+        .background(widgetGradient())
     }
 }
 
@@ -152,25 +162,15 @@ private struct MediumWidgetView: View {
 
 private extension WidgetEntry {
     var dailyChangePercent: String? {
-        guard abs(netWorth - dailyChange) > 0.01 else { return nil }
         let base = netWorth - dailyChange
+        guard abs(base) > 0.01 else { return nil }
         let pct = (dailyChange / abs(base)) * 100
-        let sign = pct >= 0 ? "+" : ""
-        return "\(sign)\(String(format: "%.2f", pct))%"
+        return "\(pct >= 0 ? "+" : "")\(String(format: "%.2f", pct))%"
     }
 }
 
-private var backgroundGradient: some View {
-    LinearGradient(
-        colors: [Color(red: 0.09, green: 0.12, blue: 0.22),
-                 Color(red: 0.06, green: 0.08, blue: 0.16)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-}
-
 private extension Double {
-    func currencyFormatted(code: String) -> String {
+    func widgetFormatted(code: String) -> String {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = code
@@ -187,7 +187,7 @@ struct NetWorthWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NetWorthProvider()) { entry in
             NetWorthWidgetEntryView(entry: entry)
-                .containerBackground(backgroundGradient, for: .widget)
+                .containerBackground(widgetGradient(), for: .widget)
         }
         .configurationDisplayName("Net Worth")
         .description("Your current net worth and today's change.")

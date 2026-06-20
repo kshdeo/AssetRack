@@ -6,7 +6,7 @@ import WidgetKit
 /// Call `update` after any balance or price change — it also signals
 /// WidgetKit to reload the widget timeline.
 struct WidgetDataStore {
-    static let appGroupID = "group.com.blackforestapps.assetsRack"
+    static let appGroupID = "group.blackforestapps.assetsRack"
 
     private static var defaults: UserDefaults? {
         UserDefaults(suiteName: appGroupID)
