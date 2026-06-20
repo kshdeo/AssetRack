@@ -50,17 +50,59 @@ private struct NetWorthProvider: TimelineProvider {
     }
 }
 
-// MARK: - Background gradient
+// MARK: - App icon badge
 
-// Concrete return type (LinearGradient) satisfies both View (.background)
-// and ShapeStyle (.containerBackground) without type-erasing to some View.
-private func widgetGradient() -> LinearGradient {
-    LinearGradient(
-        colors: [Color(red: 0.09, green: 0.12, blue: 0.22),
-                 Color(red: 0.06, green: 0.08, blue: 0.16)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+private struct AppIconBadge: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.22, green: 0.55, blue: 0.97),
+                         Color(red: 0.10, green: 0.32, blue: 0.82)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 30, height: 30)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+// MARK: - Change row
+
+private struct ChangeRow: View {
+    let entry: WidgetEntry
+
+    private var changeColor: Color {
+        entry.dailyChange >= 0
+            ? Color(red: 0.2, green: 0.85, blue: 0.45)
+            : Color(red: 1.0, green: 0.35, blue: 0.35)
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                .font(.system(size: 10, weight: .bold))
+            Text(abs(entry.dailyChange).widgetFormatted(code: entry.currency))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            if let pct = entry.dailyChangePercent {
+                Text(pct)
+                    .font(.caption.weight(.medium))
+                    .opacity(0.85)
+            }
+            if let updated = entry.updatedAt {
+                Spacer(minLength: 0)
+                (Text(updated, style: .relative) + Text(" ago"))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+        }
+        .foregroundStyle(changeColor)
+    }
 }
 
 // MARK: - Views
@@ -69,36 +111,35 @@ private struct SmallWidgetView: View {
     let entry: WidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Net Worth")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.7))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                Text("Net Worth")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                AppIconBadge()
+            }
+
+            Spacer(minLength: 6)
 
             Text(entry.netWorth.widgetFormatted(code: entry.currency))
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.white)
-                .minimumScaleFactor(0.6)
+                .minimumScaleFactor(0.45)
                 .lineLimit(1)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 10)
 
-            HStack(spacing: 4) {
-                Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
-                    .font(.caption2.weight(.semibold))
-                Text(abs(entry.dailyChange).widgetFormatted(code: entry.currency))
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .foregroundStyle(entry.dailyChange >= 0 ? Color.green : Color.red)
+            Text("TODAY'S CHANGE")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(0.5)
 
-            if let pct = entry.dailyChangePercent {
-                Text(pct)
-                    .font(.caption2)
-                    .foregroundStyle(entry.dailyChange >= 0 ? Color.green.opacity(0.8) : Color.red.opacity(0.8))
-            }
+            Spacer(minLength: 4)
+
+            ChangeRow(entry: entry)
         }
-        .padding()
+        .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
@@ -107,52 +148,36 @@ private struct MediumWidgetView: View {
     let entry: WidgetEntry
 
     var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
                 Text("Net Worth")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.7))
-
-                Text(entry.netWorth.widgetFormatted(code: entry.currency))
-                    .font(.title.weight(.bold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-
-                if let updated = entry.updatedAt {
-                    Text("Updated \(updated.formatted(.relative(presentation: .named)))")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.5))
-                }
+                Spacer()
+                AppIconBadge()
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 6) {
-                HStack(spacing: 4) {
-                    Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
-                        .font(.caption.weight(.bold))
-                    Text(entry.dailyChange >= 0 ? "+" : "")
-                    + Text(abs(entry.dailyChange).widgetFormatted(code: entry.currency))
-                }
-                .font(.subheadline.weight(.semibold))
-                .minimumScaleFactor(0.6)
+            Text(entry.netWorth.widgetFormatted(code: entry.currency))
+                .font(.title.weight(.bold))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.5)
                 .lineLimit(1)
-                .foregroundStyle(entry.dailyChange >= 0 ? Color.green : Color.red)
 
-                if let pct = entry.dailyChangePercent {
-                    Text(pct)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(entry.dailyChange >= 0 ? Color.green.opacity(0.8) : Color.red.opacity(0.8))
-                }
+            Spacer(minLength: 12)
 
-                Text("Today")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.5))
-            }
+            Text("TODAY'S CHANGE")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
+                .tracking(0.5)
+
+            Spacer(minLength: 5)
+
+            ChangeRow(entry: entry)
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
