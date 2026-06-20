@@ -73,6 +73,12 @@ struct DashboardView: View {
             }
             .task(id: DashboardViewModel.dataKey(accounts: accounts, currency: currencyService)) {
                 vm.recalculate(accounts: accounts, currency: currencyService)
+                // Push to widget using the VM's value so both show exactly the same number.
+                WidgetDataStore.update(
+                    netWorth:    vm.netWorth.amount,
+                    dailyChange: vm.todaysGain?.amount ?? 0,
+                    currency:    vm.netWorth.currency
+                )
             }
             .refreshable {
                 // Wrap in an unstructured Task so the network requests are not
@@ -101,9 +107,6 @@ struct DashboardView: View {
                 modelContext.reconcileAccountBalances()
                 await currencyService.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
-                // Push current net worth to the widget so it shows real data
-                // on first launch even before any account is saved or refreshed.
-                modelContext.refreshWidgetData(currency: currencyService)
             }
             .onChange(of: scenePhase) { _, newPhase in
                 // The identity-less .task above only fires on first appearance.
@@ -113,7 +116,6 @@ struct DashboardView: View {
                     Task { @MainActor in
                         await currencyService.fetchIfNeeded()
                         await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
-                        modelContext.refreshWidgetData(currency: currencyService)
                     }
                 }
             }
