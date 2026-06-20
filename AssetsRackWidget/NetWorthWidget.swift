@@ -100,7 +100,6 @@ private struct SmallWidgetView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(widgetGradient())
     }
 }
 
@@ -154,7 +153,6 @@ private struct MediumWidgetView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(widgetGradient())
     }
 }
 
@@ -187,7 +185,7 @@ struct NetWorthWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NetWorthProvider()) { entry in
             NetWorthWidgetEntryView(entry: entry)
-                .containerBackground(widgetGradient(), for: .widget)
+                .containerBackground(for: .widget) { widgetGradient() }
         }
         .configurationDisplayName("Net Worth")
         .description("Your current net worth and today's change.")
