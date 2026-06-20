@@ -69,11 +69,21 @@
 			);
 			target = 7DBDA4382FE727B2004177C9 /* AssetsRackWidgetExtension */;
 		};
+		7DBDA5CF2FE74B65004177C9 /* Exceptions for "AssetRack" folder in "AssetRack" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7D2F86F82FB3D40400EF63A1 /* AssetRack */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7D2F86FB2FB3D40400EF63A1 /* AssetRack */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7DBDA5CF2FE74B65004177C9 /* Exceptions for "AssetRack" folder in "AssetRack" target */,
+			);
 			path = AssetRack;
 			sourceTree = "<group>";
 		};
@@ -521,6 +531,7 @@
 				DEVELOPMENT_TEAM = 8FAE3495C4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AssetRack/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Assets Rack";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
@@ -557,6 +568,7 @@
 				DEVELOPMENT_TEAM = 8FAE3495C4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AssetRack/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Assets Rack";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";

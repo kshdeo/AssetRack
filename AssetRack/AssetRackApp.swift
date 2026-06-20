@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import BackgroundTasks
 
 @main
 struct AssetRackApp: App {
@@ -25,12 +26,16 @@ struct AssetRackApp: App {
                 fatalError("Could not create ModelContainer even after wiping store: \(error)")
             }
         }
+        BackgroundRefreshService.registerHandler(container: container)
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(lockService)
+                .onAppear {
+                    BackgroundRefreshService.scheduleNext()
+                }
         }
         .modelContainer(container)
     }
