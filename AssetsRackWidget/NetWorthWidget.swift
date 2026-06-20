@@ -85,9 +85,9 @@ private struct ChangeRow: View {
                     .font(.caption.weight(.medium))
                     .opacity(0.85)
             }
-            if let updated = entry.updatedAt {
+            if let label = entry.updatedLabel {
                 Spacer(minLength: 0)
-                (Text(updated, style: .relative) + Text(" ago"))
+                Text(label)
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.45))
             }
@@ -175,6 +175,16 @@ private struct MediumWidgetView: View {
 // MARK: - Helpers
 
 private extension WidgetEntry {
+    var updatedLabel: String? {
+        guard let updated = updatedAt else { return nil }
+        let minutes = Int(Date().timeIntervalSince(updated) / 60)
+        switch minutes {
+        case 0:       return "just now"
+        case 1..<60:  return "\(minutes)m ago"
+        default:      return "\(minutes / 60)h ago"
+        }
+    }
+
     var dailyChangePercent: String? {
         let base = netWorth - dailyChange
         guard abs(base) > 0.01 else { return nil }
