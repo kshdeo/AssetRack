@@ -54,19 +54,10 @@ private struct NetWorthProvider: TimelineProvider {
 
 private struct AppIconBadge: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.22, green: 0.55, blue: 0.97),
-                         Color(red: 0.10, green: 0.32, blue: 0.82)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: 30, height: 30)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        Image("WidgetAppIcon")
+            .resizable()
+            .frame(width: 30, height: 30)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 }
 
@@ -139,7 +130,7 @@ private struct SmallWidgetView: View {
 
             ChangeRow(entry: entry)
         }
-        .padding(14)
+        .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
@@ -172,11 +163,11 @@ private struct MediumWidgetView: View {
                 .foregroundStyle(.white.opacity(0.45))
                 .tracking(0.5)
 
-            Spacer(minLength: 5)
+            Spacer(minLength: 4)
 
             ChangeRow(entry: entry)
         }
-        .padding(14)
+        .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
