@@ -6,6 +6,7 @@ struct DashboardView: View {
     @Query private var accounts: [Account]
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = DashboardViewModel()
     @State private var currencyService = CurrencyService()
     @State private var ticker = TickerService()
@@ -100,6 +101,17 @@ struct DashboardView: View {
                 modelContext.reconcileAccountBalances()
                 await currencyService.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                // The identity-less .task above only fires on first appearance.
+                // Without this, returning from background never re-fetches
+                // because DashboardView stays mounted the whole app session.
+                if newPhase == .active {
+                    Task { @MainActor in
+                        await currencyService.fetchIfNeeded()
+                        await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
+                    }
+                }
             }
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showingSettings) {

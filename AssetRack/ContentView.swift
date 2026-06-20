@@ -17,17 +17,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .background:
-                lockService.lockIfEnabled()
+                lockService.noteBackground()
             case .active:
-                // Trigger auth here — not in LockView.task — so the prompt
-                // always fires after the window is fully foregrounded. Doing
-                // it in LockView.task races against backgrounding: the task
-                // fires while the app is still going away, LAContext gets a
-                // systemCancel (swallowed silently), the task completes, and
-                // nothing re-prompts when the user returns.
-                if lockService.isLocked {
-                    Task { await lockService.authenticate() }
-                }
+                Task { await lockService.checkAndAuthenticateIfNeeded() }
             default:
                 break
             }

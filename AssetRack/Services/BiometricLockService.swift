@@ -19,24 +19,50 @@ final class BiometricLockService {
     // lock would trap the user and we disable the toggle.
     private(set) var canUseLock: Bool = false
 
+    // Timestamp of the most recent background event. Nil on cold launch,
+    // which is how we distinguish "never ran before" from "was backgrounded".
+    private var backgroundedAt: Date?
+
+    // Re-auth is skipped if the app returns within this window.
+    private let gracePeriod: TimeInterval = 60
+
     init() {
         refreshCapabilities()
-        if isEnabled { isLocked = true }
+        if isEnabled { isLocked = true }   // cold launch always locks
     }
 
-    // Re-check at call sites where the enrolment state may have changed
-    // (e.g. when the user returns from Settings.app).
     func refreshCapabilities() {
         let context = LAContext()
         var error: NSError?
         canUseLock = context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
-        // biometryType is populated as a side-effect of canEvaluatePolicy above.
         biometryType = context.biometryType
     }
 
-    func lockIfEnabled() {
+    /// Call when the app moves to background. Records the timestamp so the
+    /// grace-period check on the next foreground has a reference point.
+    func noteBackground() {
         guard isEnabled else { return }
-        isLocked = true
+        backgroundedAt = Date()
+    }
+
+    /// Call when the app becomes active. Locks and prompts for auth only if:
+    ///  - cold launch (isLocked was set in init, backgroundedAt is nil), or
+    ///  - the app was backgrounded for longer than the grace period.
+    /// Returns immediately without prompting if the user came back quickly.
+    func checkAndAuthenticateIfNeeded() async {
+        guard isEnabled else { return }
+
+        if let since = backgroundedAt {
+            backgroundedAt = nil
+            guard Date().timeIntervalSince(since) >= gracePeriod else {
+                return  // back within 1 min — no re-auth
+            }
+            isLocked = true
+        }
+
+        if isLocked {
+            await authenticate()
+        }
     }
 
     func authenticate() async {
