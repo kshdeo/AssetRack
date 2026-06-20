@@ -82,8 +82,8 @@ private struct ChangeRow: View {
                 .lineLimit(1)
             if let pct = entry.dailyChangePercent {
                 Text("  \(pct)")
-                    .font(.caption.weight(.medium))
-                    .opacity(0.85)
+                    .font(.system(size: 9, weight: .medium))
+                    .opacity(0.75)
             }
             if showTimestamp, let label = entry.updatedLabel {
                 Spacer(minLength: 8)
