@@ -65,7 +65,6 @@ private struct AppIconBadge: View {
 
 private struct ChangeRow: View {
     let entry: WidgetEntry
-    var showTimestamp: Bool = false
 
     private var changeColor: Color {
         entry.dailyChange >= 0
@@ -77,15 +76,17 @@ private struct ChangeRow: View {
         HStack(spacing: 0) {
             Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
                 .font(.system(size: 10, weight: .bold))
-            Text(" \(abs(entry.dailyChange).widgetFormatted(code: entry.currency))")
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-            if let pct = entry.dailyChangePercent {
-                Text("  \(pct)")
-                    .font(.system(size: 10, weight: .medium))
-                    .opacity(0.75)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(" \(abs(entry.dailyChange).widgetFormatted(code: entry.currency))")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                if let pct = entry.dailyChangePercent {
+                    Text("  \(pct)")
+                        .font(.system(size: 10, weight: .medium))
+                        .opacity(0.75)
+                }
             }
-            if showTimestamp, let label = entry.updatedLabel {
+            if let label = entry.updatedLabel {
                 Spacer(minLength: 8)
                 Text(label)
                     .font(.caption2)
@@ -107,14 +108,14 @@ private struct NetWorthWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .bottom) {
+            HStack(alignment: .center) {
                 Text("Net Worth")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.45))
                 Spacer()
                 AppIconBadge()
             }
-            .padding(.bottom, 4)
+            .padding(.bottom, 2)
 
             Text(entry.netWorth.widgetFormatted(code: entry.currency))
                 .font(isMedium ? .title.weight(.medium) : .title2.weight(.medium))
@@ -122,18 +123,19 @@ private struct NetWorthWidgetView: View {
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 8)
+
             VStack(alignment: .leading, spacing: 0) {
                 Text("TODAY")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.45))
                     .padding(.bottom, 4)
                     .tracking(0.5)
                                 
-                ChangeRow(entry: entry, showTimestamp: isMedium)
+                ChangeRow(entry: entry)
             }
         }
-        .padding(isMedium ? 4 : 2)
+        .padding(isMedium ? 4 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
