@@ -105,7 +105,7 @@ private struct SmallWidgetView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 Text("Net Worth")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.light))
                     .foregroundStyle(.white)
                 Spacer()
                 AppIconBadge()
@@ -114,15 +114,15 @@ private struct SmallWidgetView: View {
             Spacer(minLength: 6)
 
             Text(entry.netWorth.widgetFormatted(code: entry.currency))
-                .font(.title2.weight(.bold))
+                .font(.title2.weight(.medium))
                 .foregroundStyle(.white)
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
 
             Spacer(minLength: 10)
 
-            Text("TODAY'S CHANGE")
-                .font(.system(size: 8, weight: .semibold))
+            Text("TODAY")
+                .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
                 .tracking(0.5)
 
@@ -142,24 +142,24 @@ private struct MediumWidgetView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 Text("Net Worth")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.light))
                     .foregroundStyle(.white)
                 Spacer()
                 AppIconBadge()
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
             Text(entry.netWorth.widgetFormatted(code: entry.currency))
-                .font(.title.weight(.bold))
+                .font(.title.weight(.medium))
                 .foregroundStyle(.white)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
 
             Spacer(minLength: 12)
 
-            Text("TODAY'S CHANGE")
-                .font(.system(size: 8, weight: .semibold))
+            Text("TODAY")
+                .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
                 .tracking(0.5)
 
