@@ -56,7 +56,7 @@ private struct AppIconBadge: View {
     var body: some View {
         Image("WidgetAppIcon")
             .resizable()
-            .frame(width: 30, height: 30)
+            .frame(width: 24, height: 24)
             .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 }
@@ -82,7 +82,7 @@ private struct ChangeRow: View {
                 .lineLimit(1)
             if let pct = entry.dailyChangePercent {
                 Text("  \(pct)")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .opacity(0.75)
             }
             if showTimestamp, let label = entry.updatedLabel {
@@ -107,15 +107,14 @@ private struct NetWorthWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
+            HStack(alignment: .bottom) {
                 Text("Net Worth")
-                    .font(.subheadline.weight(.light))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
                 Spacer()
                 AppIconBadge()
             }
-
-            Spacer(minLength: isMedium ? 4 : 6)
+            .padding(.bottom, 4)
 
             Text(entry.netWorth.widgetFormatted(code: entry.currency))
                 .font(isMedium ? .title.weight(.medium) : .title2.weight(.medium))
@@ -123,18 +122,18 @@ private struct NetWorthWidgetView: View {
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
 
-            Spacer(minLength: isMedium ? 12 : 10)
-
-            Text("TODAY")
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
-                .tracking(0.5)
-
-            Spacer(minLength: 4)
-
-            ChangeRow(entry: entry, showTimestamp: isMedium)
+            Spacer()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("TODAY")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.bottom, 4)
+                    .tracking(0.5)
+                                
+                ChangeRow(entry: entry, showTimestamp: isMedium)
+            }
         }
-        .padding(4)
+        .padding(isMedium ? 4 : 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
