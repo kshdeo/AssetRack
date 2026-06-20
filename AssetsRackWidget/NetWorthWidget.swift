@@ -96,10 +96,13 @@ private struct ChangeRow: View {
     }
 }
 
-// MARK: - Views
+// MARK: - Widget content view
 
-private struct SmallWidgetView: View {
+private struct NetWorthWidgetView: View {
+    @Environment(\.widgetFamily) var family
     let entry: WidgetEntry
+
+    private var isMedium: Bool { family == .systemMedium }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -111,52 +114,15 @@ private struct SmallWidgetView: View {
                 AppIconBadge()
             }
 
-            Spacer(minLength: 6)
+            Spacer(minLength: isMedium ? 4 : 6)
 
             Text(entry.netWorth.widgetFormatted(code: entry.currency))
-                .font(.title2.weight(.medium))
+                .font(isMedium ? .title.weight(.medium) : .title2.weight(.medium))
                 .foregroundStyle(.white)
                 .minimumScaleFactor(0.45)
                 .lineLimit(1)
 
-            Spacer(minLength: 10)
-
-            Text("TODAY")
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
-                .tracking(0.5)
-
-            Spacer(minLength: 4)
-
-            ChangeRow(entry: entry)
-        }
-        .padding(4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-}
-
-private struct MediumWidgetView: View {
-    let entry: WidgetEntry
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                Text("Net Worth")
-                    .font(.subheadline.weight(.light))
-                    .foregroundStyle(.white)
-                Spacer()
-                AppIconBadge()
-            }
-
-            Spacer(minLength: 4)
-
-            Text(entry.netWorth.widgetFormatted(code: entry.currency))
-                .font(.title.weight(.medium))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-
-            Spacer(minLength: 12)
+            Spacer(minLength: isMedium ? 12 : 10)
 
             Text("TODAY")
                 .font(.system(size: 8, weight: .medium))
@@ -227,17 +193,8 @@ struct NetWorthWidget: Widget {
 }
 
 private struct NetWorthWidgetEntryView: View {
-    @Environment(\.widgetFamily) var family
     let entry: WidgetEntry
-
-    var body: some View {
-        switch family {
-        case .systemMedium:
-            MediumWidgetView(entry: entry)
-        default:
-            SmallWidgetView(entry: entry)
-        }
-    }
+    var body: some View { NetWorthWidgetView(entry: entry) }
 }
 
 // MARK: - Widget bundle entry point
