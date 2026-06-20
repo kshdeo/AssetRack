@@ -65,6 +65,7 @@ private struct AppIconBadge: View {
 
 private struct ChangeRow: View {
     let entry: WidgetEntry
+    var showTimestamp: Bool = false
 
     private var changeColor: Color {
         entry.dailyChange >= 0
@@ -73,22 +74,22 @@ private struct ChangeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
                 .font(.system(size: 10, weight: .bold))
-            Text(abs(entry.dailyChange).widgetFormatted(code: entry.currency))
+            Text(" \(abs(entry.dailyChange).widgetFormatted(code: entry.currency))")
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
             if let pct = entry.dailyChangePercent {
-                Text(pct)
+                Text("  \(pct)")
                     .font(.caption.weight(.medium))
                     .opacity(0.85)
             }
-            if let label = entry.updatedLabel {
-                Spacer(minLength: 0)
+            if showTimestamp, let label = entry.updatedLabel {
+                Spacer(minLength: 8)
                 Text(label)
                     .font(.caption2)
+                    .lineLimit(1)
                     .foregroundStyle(.white.opacity(0.45))
             }
         }
@@ -131,7 +132,7 @@ private struct NetWorthWidgetView: View {
 
             Spacer(minLength: 4)
 
-            ChangeRow(entry: entry)
+            ChangeRow(entry: entry, showTimestamp: isMedium)
         }
         .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -164,7 +165,9 @@ private extension Double {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = code
+        f.locale = Locale(identifier: "en_GB") // consistent thousands/decimal separators
         f.maximumFractionDigits = 0
+        f.usesGroupingSeparator = true
         return f.string(from: NSNumber(value: self)) ?? "\(code) \(Int(self))"
     }
 }
