@@ -341,13 +341,27 @@ extension ModelContext {
             accounts.filter { $0.isLiability }.map { Money($0.currentBalance, $0.currency) },
             in: base
         ).amount
+        let netWorth = assets - liabilities
         insert(NetWorthSnapshot(
-            netWorth: assets - liabilities,
+            netWorth: netWorth,
             totalAssets: assets,
             totalLiabilities: liabilities,
             currency: base,
             recordedAt: date
         ))
+
+        // Compute daily change vs the most recent snapshot from before today,
+        // then push the update to the home-screen widget.
+        let startOfToday = Calendar.current.startOfDay(for: date)
+        var descriptor = FetchDescriptor<NetWorthSnapshot>(
+            sortBy: [SortDescriptor(\.recordedAt, order: .reverse)]
+        )
+        descriptor.predicate = #Predicate { $0.recordedAt < startOfToday }
+        descriptor.fetchLimit = 1
+        let previousNetWorth = (try? fetch(descriptor).first?.netWorth) ?? netWorth
+        WidgetDataStore.update(netWorth: netWorth,
+                               dailyChange: netWorth - previousNetWorth,
+                               currency: base)
     }
 
     /// Repair any manual accounts whose `currentBalance` has drifted from their
