@@ -113,6 +113,7 @@ struct DashboardView: View {
                     Task { @MainActor in
                         await currencyService.fetchIfNeeded()
                         await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
+                        modelContext.refreshWidgetData(currency: currencyService)
                     }
                 }
             }
