@@ -364,6 +364,33 @@ extension ModelContext {
                                currency: base)
     }
 
+    /// Push current net worth to the widget without inserting a snapshot.
+    /// Call on dashboard load so the widget shows real data immediately,
+    /// even if no account was saved or refreshed in the current session.
+    func refreshWidgetData(currency: CurrencyService) {
+        let accounts = (try? fetch(FetchDescriptor<Account>())) ?? []
+        let base = currency.baseCurrency
+        let assets = currency.sum(
+            accounts.filter { !$0.isLiability }.map { Money($0.currentBalance, $0.currency) },
+            in: base
+        ).amount
+        let liabilities = currency.sum(
+            accounts.filter { $0.isLiability }.map { Money($0.currentBalance, $0.currency) },
+            in: base
+        ).amount
+        let netWorth = assets - liabilities
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        var descriptor = FetchDescriptor<NetWorthSnapshot>(
+            sortBy: [SortDescriptor(\.recordedAt, order: .reverse)]
+        )
+        descriptor.predicate = #Predicate { $0.recordedAt < startOfToday }
+        descriptor.fetchLimit = 1
+        let previousNetWorth = (try? fetch(descriptor).first?.netWorth) ?? netWorth
+        WidgetDataStore.update(netWorth: netWorth,
+                               dailyChange: netWorth - previousNetWorth,
+                               currency: base)
+    }
+
     /// Repair any manual accounts whose `currentBalance` has drifted from their
     /// latest snapshot (e.g. after editing history, which only writes snapshots).
     /// Idempotent — saves only when something actually changed. Call after any

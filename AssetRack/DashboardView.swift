@@ -101,6 +101,9 @@ struct DashboardView: View {
                 modelContext.reconcileAccountBalances()
                 await currencyService.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
+                // Push current net worth to the widget so it shows real data
+                // on first launch even before any account is saved or refreshed.
+                modelContext.refreshWidgetData(currency: currencyService)
             }
             .onChange(of: scenePhase) { _, newPhase in
                 // The identity-less .task above only fires on first appearance.
