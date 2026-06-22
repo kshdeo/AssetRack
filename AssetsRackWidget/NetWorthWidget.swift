@@ -33,15 +33,17 @@ private struct NetWorthProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
-        let current = entry()
-        let nextRefresh = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
-        completion(Timeline(entries: [current], policy: .after(nextRefresh)))
+        let now = Date()
+        // Two entries: "just now" for the first minute, then live-relative after that.
+        let entries = [entry(at: now), entry(at: now.addingTimeInterval(60))]
+        let nextRefresh = now.addingTimeInterval(3600)
+        completion(Timeline(entries: entries, policy: .after(nextRefresh)))
     }
 
-    private func entry() -> WidgetEntry {
+    private func entry(at date: Date = Date()) -> WidgetEntry {
         let d = UserDefaults(suiteName: appGroupID)
         return WidgetEntry(
-            date: Date(),
+            date: date,
             netWorth:    d?.double(forKey: "widget_net_worth")    ?? 0,
             dailyChange: d?.double(forKey: "widget_daily_change") ?? 0,
             currency:    d?.string(forKey: "widget_currency")     ?? "USD",
@@ -88,10 +90,16 @@ private struct ChangeRow: View {
             }
             if let updated = entry.updatedAt {
                 Spacer(minLength: 8)
-                Text(updated, style: .relative)
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .foregroundStyle(.white.opacity(0.45))
+                if entry.date.timeIntervalSince(updated) < 60 {
+                    Text("just now")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.45))
+                } else {
+                    Text(updated, style: .relative)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
             }
         }
         .foregroundStyle(changeColor)
