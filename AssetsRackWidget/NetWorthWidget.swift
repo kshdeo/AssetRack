@@ -86,9 +86,9 @@ private struct ChangeRow: View {
                         .opacity(0.75)
                 }
             }
-            if let label = entry.updatedLabel {
+            if let updated = entry.updatedAt {
                 Spacer(minLength: 8)
-                Text(label)
+                Text(updated, style: .relative)
                     .font(.caption2)
                     .lineLimit(1)
                     .foregroundStyle(.white.opacity(0.45))
@@ -143,16 +143,6 @@ private struct NetWorthWidgetView: View {
 // MARK: - Helpers
 
 private extension WidgetEntry {
-    var updatedLabel: String? {
-        guard let updated = updatedAt else { return nil }
-        let minutes = Int(Date().timeIntervalSince(updated) / 60)
-        switch minutes {
-        case 0:       return "just now"
-        case 1..<60:  return "\(minutes)m ago"
-        default:      return "\(minutes / 60)h ago"
-        }
-    }
-
     var dailyChangePercent: String? {
         let base = netWorth - dailyChange
         guard abs(base) > 0.01 else { return nil }
