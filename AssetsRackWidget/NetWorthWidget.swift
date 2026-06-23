@@ -11,13 +11,15 @@ private struct WidgetEntry: TimelineEntry {
     let dailyChange: Double
     let currency: String
     let updatedAt: Date?
+    let ageLabel: String?
 
     static let placeholder = WidgetEntry(
         date: Date(),
         netWorth: 128_540,
         dailyChange: 1_230,
         currency: "USD",
-        updatedAt: Date()
+        updatedAt: Date(),
+        ageLabel: "just now"
     )
 }
 
@@ -29,26 +31,39 @@ private struct NetWorthProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WidgetEntry) -> Void) {
-        completion(entry())
+        completion(makeEntries(now: Date()).first!)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
         let now = Date()
-        // Two entries: "just now" for the first minute, then live-relative after that.
-        let entries = [entry(at: now), entry(at: now.addingTimeInterval(60))]
-        let nextRefresh = now.addingTimeInterval(3600)
-        completion(Timeline(entries: entries, policy: .after(nextRefresh)))
+        let entries = makeEntries(now: now)
+        completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(3600))))
     }
 
-    private func entry(at date: Date = Date()) -> WidgetEntry {
+    // One entry per minute for 60 minutes, each with a pre-computed age label.
+    // WidgetKit switches entries automatically — no live Date() calls in the view.
+    private func makeEntries(now: Date) -> [WidgetEntry] {
         let d = UserDefaults(suiteName: appGroupID)
-        return WidgetEntry(
-            date: date,
-            netWorth:    d?.double(forKey: "widget_net_worth")    ?? 0,
-            dailyChange: d?.double(forKey: "widget_daily_change") ?? 0,
-            currency:    d?.string(forKey: "widget_currency")     ?? "USD",
-            updatedAt:   d?.object(forKey: "widget_updated_at") as? Date
-        )
+        let netWorth    = d?.double(forKey: "widget_net_worth")    ?? 0
+        let dailyChange = d?.double(forKey: "widget_daily_change") ?? 0
+        let currency    = d?.string(forKey: "widget_currency")     ?? "USD"
+        let updatedAt   = d?.object(forKey: "widget_updated_at")   as? Date
+
+        return (0...60).map { minute in
+            let entryDate = now.addingTimeInterval(TimeInterval(minute * 60))
+            let label: String? = updatedAt.map { ageLabel(at: entryDate, updatedAt: $0) }
+            return WidgetEntry(date: entryDate, netWorth: netWorth, dailyChange: dailyChange,
+                               currency: currency, updatedAt: updatedAt, ageLabel: label)
+        }
+    }
+
+    private func ageLabel(at date: Date, updatedAt: Date) -> String {
+        let minutes = Int(date.timeIntervalSince(updatedAt) / 60)
+        switch minutes {
+        case ..<1:   return "just now"
+        case ..<60:  return "\(minutes) min ago"
+        default:     return "\(minutes / 60) hr ago"
+        }
     }
 }
 
@@ -88,18 +103,12 @@ private struct ChangeRow: View {
                         .opacity(0.75)
                 }
             }
-            if let updated = entry.updatedAt {
+            if let label = entry.ageLabel {
                 Spacer(minLength: 8)
-                if entry.date.timeIntervalSince(updated) < 60 {
-                    Text("just now")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.45))
-                } else {
-                    Text(updated, style: .relative)
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .foregroundStyle(.white.opacity(0.45))
-                }
+                Text(label)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .foregroundStyle(.white.opacity(0.45))
             }
         }
         .foregroundStyle(changeColor)
@@ -139,7 +148,7 @@ private struct NetWorthWidgetView: View {
                     .foregroundStyle(.white.opacity(0.45))
                     .padding(.bottom, 4)
                     .tracking(0.5)
-                                
+
                 ChangeRow(entry: entry)
             }
         }
