@@ -37,6 +37,7 @@ final class DashboardViewModel {
     private(set) var topAccounts: [Account] = []
 
     private(set) var todaysGain: TodaysGain?
+    private(set) var topMovers: [AccountMover] = []
     private(set) var weekDelta: Double?
     private(set) var monthDelta: Double?
     private(set) var yearDelta: Double?
@@ -53,6 +54,7 @@ final class DashboardViewModel {
         allocationSegments = computeAllocationSegments(accounts: accounts, currency: currency)
         topAccounts      = computeTopAccounts(accounts: accounts)
         todaysGain       = computeTodaysGain(historyEntries: historyEntries)
+        topMovers        = computeTopMovers(accounts: accounts, currency: currency)
         weekDelta        = computePeriodDelta(stackedData: stackedData, by: .day, value: -7)
         monthDelta       = computePeriodDelta(stackedData: stackedData, by: .month, value: -1)
         yearDelta        = computePeriodDelta(stackedData: stackedData, by: .year, value: -1)
@@ -85,6 +87,15 @@ final class DashboardViewModel {
     struct TodaysGain {
         let amount: Double
         let percent: Double?
+    }
+
+    struct AccountMover: Identifiable {
+        var id: UUID { account.id }
+        let account: Account
+        let changeAmount: Double  // signed, in base currency
+        let changePercent: Double?
+        // True when the change is good for net worth (up for assets, down for liabilities).
+        var isGain: Bool { account.dailyChangeIsGain(changeAmount) }
     }
 
     struct AllocationSegment: Identifiable {
@@ -293,6 +304,22 @@ final class DashboardViewModel {
         return grouped
             .map { AllocationSegment(category: $0.key, value: $0.value / total, color: $0.key.accentColor) }
             .sorted { $0.value > $1.value }
+    }
+
+    // MARK: - Top movers
+
+    private func computeTopMovers(accounts: [Account], currency: CurrencyService, limit: Int = 3) -> [AccountMover] {
+        let base = currency.baseCurrency
+        return accounts
+            .compactMap { account -> AccountMover? in
+                guard let pct = account.dailyChangePercent(using: currency) else { return nil }
+                let balanceInBase = currency.convert(Money(account.currentBalance, account.currency), to: base).amount
+                let changeInBase = pct * balanceInBase
+                return AccountMover(account: account, changeAmount: changeInBase, changePercent: pct)
+            }
+            .sorted { abs($0.changeAmount) > abs($1.changeAmount) }
+            .prefix(limit)
+            .map { $0 }
     }
 
     // MARK: - Accounts list

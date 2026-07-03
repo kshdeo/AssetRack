@@ -60,6 +60,10 @@ struct DashboardView: View {
                         onEdit: { accountToEdit = $0 }
                     )
 
+                    if !vm.topMovers.isEmpty {
+                        TopMoversCard(movers: vm.topMovers, currencyService: currencyService)
+                    }
+
                     if let lastUpdated = lastUpdated {
                         Text("Last updated \(lastUpdated.formatted(.relative(presentation: .named)))")
                             .font(.caption2)
@@ -640,6 +644,47 @@ struct AllocationCard: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
+}
+
+// MARK: - Top Movers Card
+
+struct TopMoversCard: View {
+    let movers: [DashboardViewModel.AccountMover]
+    let currencyService: CurrencyService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Today's Movers")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                ForEach(Array(movers.enumerated()), id: \.element.id) { index, mover in
+                    if index > 0 {
+                        Divider()
+                            .padding(.leading, 0)
+                    }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mover.account.name)
+                                .font(.subheadline.weight(.medium))
+                            if let pct = mover.changePercent {
+                                Text(pct, format: .percent.precision(.fractionLength(2)).sign(strategy: .always()))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text(currencyService.formattedBase(abs(mover.changeAmount)))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(mover.isGain ? Color(red: 0.2, green: 0.75, blue: 0.45) : Color(red: 0.95, green: 0.3, blue: 0.3))
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
 }
 
 // MARK: - Projection Teaser Card
