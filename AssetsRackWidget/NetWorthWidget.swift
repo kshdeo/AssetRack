@@ -90,25 +90,27 @@ private struct ChangeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
-                .font(.system(size: 10, weight: .bold))
-            VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 0) {
+                Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                    .font(.system(size: 10, weight: .bold))
                 Text(" \(abs(entry.dailyChange).widgetFormatted(code: entry.currency))")
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+            }
+            HStack(spacing: 0) {
                 if let pct = entry.dailyChangePercent {
                     Text("  \(pct)")
                         .font(.system(size: 10, weight: .medium))
                         .opacity(0.75)
                 }
-            }
-            if let label = entry.ageLabel {
-                Spacer(minLength: 8)
-                Text(label)
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .foregroundStyle(.white.opacity(0.45))
+                if let label = entry.ageLabel {
+                    Spacer(minLength: 8)
+                    Text(label)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(.white.opacity(0.45))
+                }
             }
         }
         .foregroundStyle(changeColor)
