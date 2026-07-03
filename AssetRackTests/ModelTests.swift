@@ -362,6 +362,43 @@ struct ConsolidateHistoryTests {
     }
 }
 
+// MARK: - NetWorthMath
+
+@Suite("NetWorthMath")
+struct NetWorthMathTests {
+    let container: ModelContainer
+    let context: ModelContext
+    let currency = makeCurrency()
+    init() { (container, context) = makeContext() }
+
+    @Test func netsAssetGainAndDebtPaydown() {
+        let cash = makeAccount(in: context, balance: 1_100, history: [(1_000, daysAgo(1))])
+        let mortgage = makeAccount(in: context, type: .mortgage, balance: 400,
+                                   history: [(500, daysAgo(1))])
+        // +100 asset gain, +100 debt paid off -> +200 net worth
+        expectClose(NetWorthMath.todaysChange(accounts: [cash, mortgage], currency: currency), 200)
+    }
+
+    @Test func accountAddedTodayCountsFully() {
+        let existing = makeAccount(in: context, balance: 1_000, history: [(1_000, daysAgo(1))])
+        let fresh = makeAccount(in: context, balance: 500) // no pre-today history
+        expectClose(NetWorthMath.todaysChange(accounts: [existing, fresh], currency: currency), 500)
+    }
+
+    @Test func convertsMixedCurrenciesAtCurrentRates() {
+        // USD account: yesterday 1270 USD (= 1000 GBP), today 2540 USD (= 2000 GBP)
+        let usd = makeAccount(in: context, balance: 2_540, currency: "USD",
+                              history: [(1_270, daysAgo(1))])
+        expectClose(NetWorthMath.todaysChange(accounts: [usd], currency: currency), 1_000)
+    }
+
+    @Test func todaysSnapshotIsNotABaseline() {
+        // Only history from today -> previous side is empty -> full balance is the change.
+        let account = makeAccount(in: context, balance: 1_100, history: [(900, Date())])
+        expectClose(NetWorthMath.todaysChange(accounts: [account], currency: currency), 1_100)
+    }
+}
+
 // MARK: - ModelContext helpers
 
 @Suite("ModelContext helpers")
@@ -384,6 +421,31 @@ struct ModelContextHelperTests {
         expectClose(snap.totalAssets, 2_000)
         expectClose(snap.totalLiabilities, 500)
         expectClose(snap.netWorth, 1_500)
+    }
+
+    @Test func recordNetWorthSnapshotUpsertsSameDay() throws {
+        makeAccount(in: context, balance: 1_000)
+        context.recordNetWorthSnapshot(currency: currency)
+        context.recordNetWorthSnapshot(currency: currency)
+
+        let snapshots = try context.fetch(FetchDescriptor<NetWorthSnapshot>())
+        #expect(snapshots.count == 1)
+    }
+
+    @Test func consolidateNetWorthHistoryCollapsesLegacyRows() throws {
+        let dayStart = Calendar.current.startOfDay(for: Date())
+        for hour in 1...3 {
+            context.insert(NetWorthSnapshot(
+                netWorth: Double(hour) * 100, totalAssets: Double(hour) * 100,
+                totalLiabilities: 0, currency: "GBP",
+                recordedAt: dayStart.addingTimeInterval(Double(hour) * 3600)
+            ))
+        }
+        try context.save()
+        #expect(context.consolidateNetWorthHistory() == 2)
+        let remaining = try context.fetch(FetchDescriptor<NetWorthSnapshot>())
+        #expect(remaining.count == 1)
+        expectClose(remaining.first?.netWorth, 300) // newest row kept
     }
 
     @Test func reconcileAccountBalancesRepairsDrift() throws {

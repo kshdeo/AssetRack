@@ -325,6 +325,39 @@ final class NetWorthSnapshot {
     }
 }
 
+// MARK: - Net worth math
+
+enum NetWorthMath {
+    /// Today's net-worth change in the base currency, matching the dashboard's
+    /// "Today's gain": live signed balances vs each account's most recent
+    /// pre-today snapshot (carry-forward). Accounts with no pre-today history
+    /// count fully as today's change.
+    ///
+    /// Deliberately NOT based on the `NetWorthSnapshot` trail — those rows
+    /// survive account deletions, are also written for historical backfills,
+    /// and bake in the FX rates of the moment they were recorded, so the most
+    /// recent pre-today row is not a reliable "yesterday" baseline.
+    static func todaysChange(accounts: [Account], currency: CurrencyService, now: Date = Date()) -> Double {
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        let base = currency.baseCurrency
+        let current = currency.sum(
+            accounts.map { Money($0.signedBalance, $0.currency) },
+            in: base
+        ).amount
+        let previous = currency.sum(
+            accounts.compactMap { account -> Money? in
+                guard let snapshot = account.balanceHistory
+                    .filter({ $0.recordedAt < startOfToday })
+                    .max(by: { $0.recordedAt < $1.recordedAt }) else { return nil }
+                let signed = account.isLiability ? -snapshot.balance : snapshot.balance
+                return Money(signed, account.currency)
+            },
+            in: base
+        ).amount
+        return current - previous
+    }
+}
+
 // MARK: - ModelContext helpers
 
 extension ModelContext {
@@ -342,25 +375,36 @@ extension ModelContext {
             in: base
         ).amount
         let netWorth = assets - liabilities
-        insert(NetWorthSnapshot(
-            netWorth: netWorth,
-            totalAssets: assets,
-            totalLiabilities: liabilities,
-            currency: base,
-            recordedAt: date
-        ))
 
-        // Compute daily change vs the most recent snapshot from before today,
-        // then push the update to the home-screen widget.
-        let startOfToday = Calendar.current.startOfDay(for: date)
-        var descriptor = FetchDescriptor<NetWorthSnapshot>(
-            sortBy: [SortDescriptor(\.recordedAt, order: .reverse)]
-        )
-        descriptor.predicate = #Predicate { $0.recordedAt < startOfToday }
-        descriptor.fetchLimit = 1
-        let previousNetWorth = (try? fetch(descriptor).first?.netWorth) ?? netWorth
+        // One NetWorthSnapshot per calendar day — this fires on every balance
+        // change (saves, ticker refreshes, pull-to-refresh), so inserting each
+        // time bloats the table with dozens of same-day rows. Upsert instead,
+        // mirroring setBalanceSnapshot's semantics.
+        let dayStart = Calendar.current.startOfDay(for: date)
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)!
+        var dayDescriptor = FetchDescriptor<NetWorthSnapshot>()
+        dayDescriptor.predicate = #Predicate { $0.recordedAt >= dayStart && $0.recordedAt < dayEnd }
+        if let existing = ((try? fetch(dayDescriptor)) ?? []).max(by: { $0.recordedAt < $1.recordedAt }) {
+            existing.netWorth = netWorth
+            existing.totalAssets = assets
+            existing.totalLiabilities = liabilities
+            existing.currency = base
+            existing.recordedAt = date
+        } else {
+            insert(NetWorthSnapshot(
+                netWorth: netWorth,
+                totalAssets: assets,
+                totalLiabilities: liabilities,
+                currency: base,
+                recordedAt: date
+            ))
+        }
+
+        // Push to the home-screen widget. Daily change comes from per-account
+        // balance history so the widget always agrees with the dashboard's
+        // "Today's gain" — see NetWorthMath.todaysChange.
         WidgetDataStore.update(netWorth: netWorth,
-                               dailyChange: netWorth - previousNetWorth,
+                               dailyChange: NetWorthMath.todaysChange(accounts: accounts, currency: currency),
                                currency: base)
     }
 
@@ -375,6 +419,25 @@ extension ModelContext {
             changed = true
         }
         if changed { try? save() }
+    }
+
+    /// One-time backfill: collapse legacy multi-row days of net worth history
+    /// down to the most recent row per day. Safe to call on every launch —
+    /// does nothing once history is clean (recordNetWorthSnapshot now upserts).
+    @discardableResult
+    func consolidateNetWorthHistory() -> Int {
+        let snapshots = (try? fetch(FetchDescriptor<NetWorthSnapshot>())) ?? []
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: snapshots) { calendar.startOfDay(for: $0.recordedAt) }
+        var deleted = 0
+        for (_, dayGroup) in grouped where dayGroup.count > 1 {
+            for stale in dayGroup.sorted(by: { $0.recordedAt > $1.recordedAt }).dropFirst() {
+                delete(stale)
+                deleted += 1
+            }
+        }
+        if deleted > 0 { try? save() }
+        return deleted
     }
 
     /// One-time backfill across every account: collapse multi-snapshot days

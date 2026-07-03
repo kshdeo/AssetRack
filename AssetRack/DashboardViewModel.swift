@@ -26,6 +26,30 @@ final class DashboardViewModel {
     // Category order for stacking (bottom → top)
     static let stackOrder: [AccountCategory] = [.cashAndBank, .investments, .pension, .realEstate]
 
+    /// Maximum days plotted on the history chart. Raw history is never
+    /// deleted; longer ranges are downsampled to stay under this budget so
+    /// the chart stays fast and readable regardless of how many years of
+    /// snapshots accumulate.
+    static let chartPointBudget = 150
+
+    /// Visible window for the history chart. Raw data is always kept; this
+    /// only controls what the chart renders.
+    enum HistoryRange: String, CaseIterable, Identifiable {
+        case threeMonths = "3M"
+        case year = "1Y"
+        case all = "All"
+
+        var id: String { rawValue }
+
+        var months: Int? {
+            switch self {
+            case .threeMonths: return 3
+            case .year:        return 12
+            case .all:         return nil
+            }
+        }
+    }
+
     // MARK: - Cached state
 
     private(set) var netWorth: Money         = Money(0, "USD")
@@ -45,26 +69,31 @@ final class DashboardViewModel {
     // MARK: - Recalculate
 
     /// Pure-function pipeline. Call from `.task(id:)` only — never from `body`.
-    func recalculate(accounts: [Account], currency: CurrencyService) {
+    func recalculate(accounts: [Account], currency: CurrencyService, historyRange: HistoryRange = .all) {
         netWorth         = computeNetWorth(accounts: accounts, currency: currency)
         totalAssets      = computeTotalAssets(accounts: accounts, currency: currency)
         totalLiabilities = computeTotalLiabilities(accounts: accounts, currency: currency)
-        stackedData      = computeStackedHistoryData(accounts: accounts, currency: currency)
+        // One shared carry-forward walk feeds both the chart and the period
+        // deltas. The chart is range-filtered and downsampled; the deltas
+        // always use the full series so w/w–y/y stay correct on short ranges.
+        let dailyTotals  = computeDailyCategoryTotals(accounts: accounts, currency: currency)
+        stackedData      = computeStackedHistoryData(dailyTotals: dailyTotals, range: historyRange)
         historyEntries   = computeAccountHistoryEntries(accounts: accounts, currency: currency)
         allocationSegments = computeAllocationSegments(accounts: accounts, currency: currency)
         topAccounts      = computeTopAccounts(accounts: accounts)
         todaysGain       = computeTodaysGain(historyEntries: historyEntries)
         topMovers        = computeTopMovers(accounts: accounts, currency: currency)
-        weekDelta        = computePeriodDelta(stackedData: stackedData, by: .day, value: -7)
-        monthDelta       = computePeriodDelta(stackedData: stackedData, by: .month, value: -1)
-        yearDelta        = computePeriodDelta(stackedData: stackedData, by: .year, value: -1)
+        weekDelta        = computePeriodDelta(dailyTotals: dailyTotals, by: .day, value: -7)
+        monthDelta       = computePeriodDelta(dailyTotals: dailyTotals, by: .month, value: -1)
+        yearDelta        = computePeriodDelta(dailyTotals: dailyTotals, by: .year, value: -1)
     }
 
     /// Single source of truth for the `.task(id:)` key — captures every input the
     /// dashboard derives data from. Cheap to compute; the iteration only does
     /// integer hash combines.
-    static func dataKey(accounts: [Account], currency: CurrencyService) -> Int {
+    static func dataKey(accounts: [Account], currency: CurrencyService, historyRange: HistoryRange = .all) -> Int {
         var hasher = Hasher()
+        hasher.combine(historyRange)
         for account in accounts {
             hasher.combine(account.id)
             hasher.combine(account.currentBalance)
@@ -145,10 +174,23 @@ final class DashboardViewModel {
 
     // MARK: - Stacked history
 
-    private func computeStackedHistoryData(accounts: [Account], currency: CurrencyService) -> [StackedDataPoint] {
+    /// Per-day asset totals by category for every day in history (ascending,
+    /// today included with live balances). Built with a single sorted walk per
+    /// account — O(days × accounts) — instead of re-filtering each account's
+    /// full history for every day, which went quadratic as history grew.
+    struct DayTotals {
+        let date: Date
+        let byCategory: [AccountCategory: Double]
+        var total: Double { byCategory.values.reduce(0, +) }
+    }
+
+    private func computeDailyCategoryTotals(accounts: [Account], currency: CurrencyService) -> [DayTotals] {
         let calendar = Calendar.current
         let base = currency.baseCurrency
         let today = calendar.startOfDay(for: Date())
+
+        let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
+        guard hasAnySnapshot else { return [] }
 
         var daySet = Set(accounts.flatMap {
             $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
@@ -156,36 +198,58 @@ final class DashboardViewModel {
         daySet.insert(today)
         let uniqueDays = daySet.sorted()
 
-        let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
-        guard hasAnySnapshot else { return [] }
+        let assetAccounts = accounts.filter { !$0.isLiability }
+        let sortedHistories = assetAccounts.map {
+            $0.balanceHistory.sorted { $0.recordedAt < $1.recordedAt }
+        }
+        var cursors = [Int](repeating: 0, count: assetAccounts.count)
+        var carried = [Double?](repeating: nil, count: assetAccounts.count)
 
-        var result: [StackedDataPoint] = []
+        var result: [DayTotals] = []
+        result.reserveCapacity(uniqueDays.count)
 
         for day in uniqueDays {
-            var categoryTotals: [AccountCategory: Double] = [:]
+            var totals: [AccountCategory: Double] = [:]
 
-            for account in accounts where !account.isLiability {
+            for (idx, account) in assetAccounts.enumerated() {
+                while cursors[idx] < sortedHistories[idx].count,
+                      calendar.startOfDay(for: sortedHistories[idx][cursors[idx]].recordedAt) <= day {
+                    carried[idx] = sortedHistories[idx][cursors[idx]].balance
+                    cursors[idx] += 1
+                }
+
                 let balance: Double
                 if day == today {
                     balance = account.currentBalance
+                } else if let carriedBalance = carried[idx] {
+                    balance = carriedBalance
                 } else {
-                    guard let snap = account.balanceHistory
-                        .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
-                        .max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
-                    balance = snap.balance
+                    continue
                 }
                 guard balance > 0 else { continue }
 
-                let converted = currency.convert(Money(balance, account.currency), to: base).amount
-                categoryTotals[account.type.category, default: 0] += converted
+                totals[account.type.category, default: 0] +=
+                    currency.convert(Money(balance, account.currency), to: base).amount
             }
 
+            result.append(DayTotals(date: day, byCategory: totals))
+        }
+
+        return result
+    }
+
+    private func computeStackedHistoryData(dailyTotals: [DayTotals], range: HistoryRange) -> [StackedDataPoint] {
+        let visible = Self.downsample(filterToRange(dailyTotals, range: range),
+                                      budget: Self.chartPointBudget)
+
+        var result: [StackedDataPoint] = []
+        for day in visible {
             var cumulative = 0.0
             for category in Self.stackOrder {
-                let value = categoryTotals[category] ?? 0
+                let value = day.byCategory[category] ?? 0
                 guard value > 0 else { continue }
                 result.append(StackedDataPoint(
-                    date: day,
+                    date: day.date,
                     category: category,
                     stackedStart: cumulative,
                     stackedEnd: cumulative + value
@@ -193,8 +257,30 @@ final class DashboardViewModel {
                 cumulative += value
             }
         }
-
         return result
+    }
+
+    private func filterToRange(_ totals: [DayTotals], range: HistoryRange) -> [DayTotals] {
+        guard let months = range.months, let last = totals.last else { return totals }
+        let cutoff = Calendar.current.date(byAdding: .month, value: -months, to: last.date)!
+        return totals.filter { $0.date >= cutoff }
+    }
+
+    /// Thin a day series to at most `budget` points. Steps backwards from the
+    /// newest day so today is always kept, and pins the earliest day so the
+    /// chart spans the full range.
+    static func downsample(_ totals: [DayTotals], budget: Int) -> [DayTotals] {
+        guard totals.count > budget, let first = totals.first else { return totals }
+
+        let step = Int((Double(totals.count) / Double(budget)).rounded(.up))
+        var kept: [DayTotals] = []
+        var idx = totals.count - 1
+        while idx >= 0 {
+            kept.append(totals[idx])
+            idx -= step
+        }
+        if kept.last?.date != first.date { kept.append(first) }
+        return Array(kept.reversed())
     }
 
     // MARK: - Per-account history entries
@@ -204,20 +290,37 @@ final class DashboardViewModel {
         let base = currency.baseCurrency
         let today = calendar.startOfDay(for: Date())
 
+        let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
+        guard hasAnySnapshot else { return [] }
+
         var daySet = Set(accounts.flatMap {
             $0.balanceHistory.map { calendar.startOfDay(for: $0.recordedAt) }
         })
         daySet.insert(today)
-        let uniqueDays = daySet.sorted().reversed()
+        let uniqueDays = daySet.sorted()
 
-        let hasAnySnapshot = accounts.contains { !$0.balanceHistory.isEmpty }
-        guard hasAnySnapshot else { return [] }
+        // Same walking-pointer pattern as computeDailyCategoryTotals: ascend
+        // through the days once, carrying each account's latest snapshot.
+        let sortedHistories = accounts.map {
+            $0.balanceHistory.sorted { $0.recordedAt < $1.recordedAt }
+        }
+        var cursors = [Int](repeating: 0, count: accounts.count)
+        var carried = [BalanceSnapshot?](repeating: nil, count: accounts.count)
 
-        return uniqueDays.map { day in
+        var entries: [AccountHistoryEntry] = []
+        entries.reserveCapacity(uniqueDays.count)
+
+        for day in uniqueDays {
             var rows: [AccountHistoryEntry.AccountRow] = []
             var total = 0.0
 
-            for account in accounts {
+            for (idx, account) in accounts.enumerated() {
+                while cursors[idx] < sortedHistories[idx].count,
+                      calendar.startOfDay(for: sortedHistories[idx][cursors[idx]].recordedAt) <= day {
+                    carried[idx] = sortedHistories[idx][cursors[idx]]
+                    cursors[idx] += 1
+                }
+
                 let balance: Double
                 let exact: BalanceSnapshot?
 
@@ -225,13 +328,9 @@ final class DashboardViewModel {
                     balance = account.currentBalance
                     exact = nil
                 } else {
-                    guard let latest = account.balanceHistory
-                        .filter({ calendar.startOfDay(for: $0.recordedAt) <= day })
-                        .max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
+                    guard let latest = carried[idx] else { continue }
                     balance = latest.balance
-                    exact = account.balanceHistory
-                        .filter({ calendar.startOfDay(for: $0.recordedAt) == day })
-                        .max(by: { $0.recordedAt < $1.recordedAt })
+                    exact = calendar.isDate(latest.recordedAt, inSameDayAs: day) ? latest : nil
                 }
 
                 let signed = account.isLiability ? -balance : balance
@@ -247,13 +346,15 @@ final class DashboardViewModel {
                 ))
             }
 
-            return AccountHistoryEntry(
+            entries.append(AccountHistoryEntry(
                 date: day,
                 baseCurrency: base,
                 totalInBase: total,
                 rows: rows.sorted { $0.accountName < $1.accountName }
-            )
+            ))
         }
+
+        return Array(entries.reversed())
     }
 
     // MARK: - Today's gain
@@ -271,19 +372,16 @@ final class DashboardViewModel {
 
     // MARK: - Period deltas
 
-    private func computePeriodDelta(stackedData: [StackedDataPoint], by component: Calendar.Component, value: Int) -> Double? {
-        let dates = Array(Set(stackedData.map { $0.date })).sorted()
-        guard let lastDate = dates.last else { return nil }
+    private func computePeriodDelta(dailyTotals: [DayTotals], by component: Calendar.Component, value: Int) -> Double? {
+        guard let last = dailyTotals.last else { return nil }
 
-        let anchor = Calendar.current.date(byAdding: component, value: value, to: lastDate)!
-        guard let prevDate = dates.min(by: {
-            abs($0.timeIntervalSince(anchor)) < abs($1.timeIntervalSince(anchor))
-        }), prevDate != lastDate else { return nil }
+        let anchor = Calendar.current.date(byAdding: component, value: value, to: last.date)!
+        guard let prev = dailyTotals.min(by: {
+            abs($0.date.timeIntervalSince(anchor)) < abs($1.date.timeIntervalSince(anchor))
+        }), prev.date != last.date else { return nil }
 
-        let prev = stackedData.filter { $0.date == prevDate }.map { $0.value }.reduce(0, +)
-        let curr = stackedData.filter { $0.date == lastDate }.map { $0.value }.reduce(0, +)
-        guard prev != 0 else { return nil }
-        return (curr - prev) / abs(prev)
+        guard prev.total != 0 else { return nil }
+        return (last.total - prev.total) / abs(prev.total)
     }
 
     // MARK: - Allocation

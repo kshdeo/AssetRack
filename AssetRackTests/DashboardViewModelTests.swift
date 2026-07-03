@@ -283,6 +283,56 @@ struct PeriodDeltaTests {
     }
 }
 
+// MARK: - History range & downsampling
+
+@Suite("History range and downsampling")
+struct HistoryRangeTests {
+    let container: ModelContainer
+    let context: ModelContext
+    init() { (container, context) = makeContext() }
+
+    @Test func longHistoryStaysUnderPointBudget() {
+        let history = (1...400).map { (balance: 1_000.0 + Double($0), date: daysAgo($0)) }
+        let account = makeAccount(in: context, balance: 2_000, history: history)
+        let vm = DashboardViewModel()
+        vm.recalculate(accounts: [account], currency: makeCurrency(), historyRange: .all)
+
+        let dates = Set(vm.stackedData.map { $0.date })
+        // +1 for the pinned earliest day
+        #expect(dates.count <= DashboardViewModel.chartPointBudget + 1)
+        #expect(dates.contains(Calendar.current.startOfDay(for: Date())))       // today kept
+        #expect(dates.contains(Calendar.current.startOfDay(for: daysAgo(400)))) // earliest kept
+    }
+
+    @Test func shortHistoryIsNotThinned() {
+        let account = makeAccount(in: context, balance: 1_100,
+                                  history: [(1_000, daysAgo(2)), (1_050, daysAgo(1))])
+        let vm = DashboardViewModel()
+        vm.recalculate(accounts: [account], currency: makeCurrency(), historyRange: .all)
+        #expect(Set(vm.stackedData.map { $0.date }).count == 3) // -2d, -1d, today
+    }
+
+    @Test func rangeFilterLimitsChartWindow() {
+        let account = makeAccount(in: context, balance: 1_100,
+                                  history: [(1_000, daysAgo(200)), (1_050, daysAgo(10))])
+        let vm = DashboardViewModel()
+        vm.recalculate(accounts: [account], currency: makeCurrency(), historyRange: .threeMonths)
+
+        let dates = Set(vm.stackedData.map { $0.date })
+        #expect(!dates.contains(Calendar.current.startOfDay(for: daysAgo(200))))
+        #expect(dates.contains(Calendar.current.startOfDay(for: daysAgo(10))))
+    }
+
+    @Test func periodDeltasIgnoreChartRange() {
+        // Chart shows 3 months, but y/y must still resolve from full history.
+        let account = makeAccount(in: context, balance: 1_100,
+                                  history: [(1_000, daysAgo(365))])
+        let vm = DashboardViewModel()
+        vm.recalculate(accounts: [account], currency: makeCurrency(), historyRange: .threeMonths)
+        expectClose(vm.yearDelta, 0.1)
+    }
+}
+
 // MARK: - Top accounts
 
 @Suite("Top accounts")

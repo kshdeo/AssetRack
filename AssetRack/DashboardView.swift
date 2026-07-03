@@ -16,6 +16,11 @@ struct DashboardView: View {
     @State private var showingSettings = false
     @State private var showingProjection = false
     @State private var accountToEdit: Account?
+    @AppStorage("history_chart_range") private var historyRangeRaw = DashboardViewModel.HistoryRange.all.rawValue
+
+    private var historyRange: DashboardViewModel.HistoryRange {
+        DashboardViewModel.HistoryRange(rawValue: historyRangeRaw) ?? .all
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,7 +46,11 @@ struct DashboardView: View {
                         stackedData: vm.stackedData,
                         historyEntries: vm.historyEntries,
                         currencyService: currencyService,
-                        selectedDate: $selectedDate
+                        selectedDate: $selectedDate,
+                        range: Binding(
+                            get: { historyRange },
+                            set: { historyRangeRaw = $0.rawValue }
+                        )
                     )
 
                     AllocationCard(segments: vm.allocationSegments)
@@ -75,8 +84,8 @@ struct DashboardView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
-            .task(id: DashboardViewModel.dataKey(accounts: accounts, currency: currencyService)) {
-                vm.recalculate(accounts: accounts, currency: currencyService)
+            .task(id: DashboardViewModel.dataKey(accounts: accounts, currency: currencyService, historyRange: historyRange)) {
+                vm.recalculate(accounts: accounts, currency: currencyService, historyRange: historyRange)
                 // Push to widget using the VM's value so both show exactly the same number.
                 WidgetDataStore.update(
                     netWorth:    vm.netWorth.amount,
@@ -109,6 +118,8 @@ struct DashboardView: View {
                 // Repair any accounts whose currentBalance drifted from their
                 // latest snapshot before this reconciliation existed.
                 modelContext.reconcileAccountBalances()
+                // Collapse legacy multi-row net worth days (upsert handles new ones).
+                modelContext.consolidateNetWorthHistory()
                 await currencyService.fetchIfNeeded()
                 await ticker.fetchIfNeeded(context: modelContext, currency: currencyService)
             }
@@ -276,6 +287,7 @@ struct NetWorthChartCard: View {
     let historyEntries: [DashboardViewModel.AccountHistoryEntry]
     let currencyService: CurrencyService
     @Binding var selectedDate: Date?
+    @Binding var range: DashboardViewModel.HistoryRange
 
     @State private var showingHistory = false
 
@@ -313,15 +325,22 @@ struct NetWorthChartCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 12) {
                 Text("History")
                     .font(.headline)
-                Spacer()
                 Button { showingHistory = true } label: {
                     Image(systemName: "list.bullet")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
+                Picker("Range", selection: $range) {
+                    ForEach(DashboardViewModel.HistoryRange.allCases) { r in
+                        Text(r.rawValue).tag(r)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 160)
             }
             .padding(.bottom, 10)
 

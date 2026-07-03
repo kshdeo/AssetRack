@@ -3,7 +3,7 @@ import SwiftData
 
 enum BackgroundRefreshService {
     static let taskID = "com.blackforestapps.assetsRack.widgetRefresh"
-    static let minimumInterval: TimeInterval = 3 * 60 * 60 // 3 hours
+    static let minimumInterval: TimeInterval = 15 * 60 // 15 minutes
 
     static func registerHandler(container: ModelContainer) {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskID, using: nil) { task in
@@ -52,18 +52,11 @@ enum BackgroundRefreshService {
         ).amount
         let netWorth = assets - liabilities
 
-        // Daily change: compare against most recent pre-today net worth snapshot
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        var descriptor = FetchDescriptor<NetWorthSnapshot>(
-            sortBy: [SortDescriptor(\.recordedAt, order: .reverse)]
-        )
-        descriptor.predicate = #Predicate { $0.recordedAt < startOfToday }
-        descriptor.fetchLimit = 1
-        let previousNetWorth = (try? context.fetch(descriptor).first?.netWorth) ?? netWorth
-
+        // Daily change from per-account balance history — same baseline as the
+        // dashboard's "Today's gain" (see NetWorthMath.todaysChange).
         WidgetDataStore.update(
             netWorth: netWorth,
-            dailyChange: netWorth - previousNetWorth,
+            dailyChange: NetWorthMath.todaysChange(accounts: accounts, currency: currency),
             currency: base
         )
     }

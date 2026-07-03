@@ -253,6 +253,9 @@ modelContext.reconcileAccountBalances()
 
 // Collapse any multi-snapshot days to one row per day (idempotent)
 modelContext.consolidateAllDailyHistory()
+
+// Same, for legacy multi-row NetWorthSnapshot days (recordNetWorthSnapshot upserts one row per day)
+modelContext.consolidateNetWorthHistory()
 ```
 
 ### Balance snapshot upsert
@@ -266,6 +269,8 @@ account.setBalanceSnapshot(balance: balance, at: date)
 - `DashboardViewModel.accountHistoryEntries(from:currency:)` — per-date list of all accounts with carry-forward values; always includes today as a read-only live entry
 - Both use "most recent snapshot on or before the date" (carry-forward) so every account appears on every date
 - Today's entry is always synthetic (no `BalanceSnapshot`), uses live `currentBalance`, and is read-only
+- Carry-forward is computed with a single sorted walk per account (walking pointer), never by filtering full history per day — the latter goes quadratic as history grows
+- The history chart is range-filtered (`HistoryRange`: 3M/1Y/All, persisted in `@AppStorage("history_chart_range")`) and downsampled to `DashboardViewModel.chartPointBudget` (~150) points; raw snapshots are never deleted. Period deltas (w/w, m/m, y/y) always use the full series, independent of the chart range
 
 ### History navigation flow
 1. `NetWorthHistoryView` — list of dates with total net worth; "+" opens `AddHistoricalEntryView`
