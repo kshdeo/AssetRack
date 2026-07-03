@@ -686,8 +686,8 @@ struct TopMoversCard: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(mover.account.name)
                                 .font(.subheadline.weight(.medium))
-                            if let pct = mover.changePercent {
-                                Text(pct, format: .percent.precision(.fractionLength(2)).sign(strategy: .always()))
+                            if let subtitle = subtitle(for: mover) {
+                                Text(subtitle)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -703,6 +703,19 @@ struct TopMoversCard: View {
         }
         .padding()
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// "+1.20% · VOO −£180" — percent change plus the holding driving the move.
+    private func subtitle(for mover: DashboardViewModel.AccountMover) -> String? {
+        var parts: [String] = []
+        if let pct = mover.changePercent {
+            parts.append(pct.formatted(.percent.precision(.fractionLength(2)).sign(strategy: .always())))
+        }
+        if let holding = mover.topHolding {
+            let sign = holding.changeAmount >= 0 ? "+" : "−"
+            parts.append("\(holding.symbol) \(sign)\(currencyService.formattedBase(abs(holding.changeAmount)))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

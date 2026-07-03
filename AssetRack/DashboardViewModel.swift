@@ -123,8 +123,15 @@ final class DashboardViewModel {
         let account: Account
         let changeAmount: Double  // signed, in base currency
         let changePercent: Double?
+        // The holding contributing the most to today's move (holdings accounts only).
+        let topHolding: HoldingImpact?
         // True when the change is good for net worth (up for assets, down for liabilities).
         var isGain: Bool { account.dailyChangeIsGain(changeAmount) }
+    }
+
+    struct HoldingImpact {
+        let symbol: String
+        let changeAmount: Double  // signed, in base currency
     }
 
     struct AllocationSegment: Identifiable {
@@ -420,11 +427,29 @@ final class DashboardViewModel {
                 guard let pct = account.dailyChangePercent(using: currency) else { return nil }
                 let balanceInBase = currency.convert(Money(account.currentBalance, account.currency), to: base).amount
                 let changeInBase = pct * balanceInBase
-                return AccountMover(account: account, changeAmount: changeInBase, changePercent: pct)
+                return AccountMover(account: account,
+                                    changeAmount: changeInBase,
+                                    changePercent: pct,
+                                    topHolding: topHoldingImpact(of: account, currency: currency))
             }
             .sorted { abs($0.changeAmount) > abs($1.changeAmount) }
             .prefix(limit)
             .map { $0 }
+    }
+
+    /// The holding with the largest absolute day change, in base currency.
+    /// Nil for manual accounts and holdings without a reference close.
+    private func topHoldingImpact(of account: Account, currency: CurrencyService) -> HoldingImpact? {
+        let base = currency.baseCurrency
+        return account.holdings
+            .compactMap { holding -> HoldingImpact? in
+                guard holding.previousClose > 0 else { return nil }
+                let delta = (holding.lastPrice - holding.previousClose) * holding.quantity
+                guard delta != 0 else { return nil }
+                let deltaInBase = currency.convert(Money(delta, holding.priceCurrency), to: base).amount
+                return HoldingImpact(symbol: holding.tickerSymbol, changeAmount: deltaInBase)
+            }
+            .max { abs($0.changeAmount) < abs($1.changeAmount) }
     }
 
     // MARK: - Accounts list

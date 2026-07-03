@@ -96,6 +96,25 @@ struct TopMoversTests {
         #expect(vm.topMovers.isEmpty)
     }
 
+    @Test func topHoldingIsTheBiggestAbsoluteMover() throws {
+        // VOO: (110-100)*10 = +100; AAPL: (80-100)*10 = -200 -> AAPL drives the move.
+        let account = makeAccount(in: context, type: .brokerage, balance: 1_900,
+                                  holdings: [makeHolding(symbol: "VOO", quantity: 10, lastPrice: 110,
+                                                         previousClose: 100, fetchedAt: Date()),
+                                             makeHolding(symbol: "AAPL", quantity: 10, lastPrice: 80,
+                                                         previousClose: 100, fetchedAt: Date())])
+        let vm = recalculated([account])
+        let holding = try #require(vm.topMovers.first?.topHolding)
+        #expect(holding.symbol == "AAPL")
+        expectClose(holding.changeAmount, -200)
+    }
+
+    @Test func manualAccountsHaveNoTopHolding() throws {
+        let cash = makeAccount(in: context, balance: 1_100, history: [(1_000, daysAgo(1))])
+        let vm = recalculated([cash])
+        #expect(try #require(vm.topMovers.first).topHolding == nil)
+    }
+
     @Test func liabilityDecreaseIsAGain() throws {
         let mortgage = makeAccount(in: context, type: .mortgage, balance: 900,
                                    history: [(1_000, daysAgo(1))])
