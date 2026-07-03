@@ -6,5 +6,9 @@
 	<array>
 		<string>com.blackforestapps.assetsRack.widgetRefresh</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 </dict>
 </plist>
