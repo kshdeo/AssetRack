@@ -23,8 +23,8 @@ struct StackedDataPoint: Identifiable {
 @Observable
 final class DashboardViewModel {
 
-    // Category order for stacking (bottom → top)
-    static let stackOrder: [AccountCategory] = [.cashAndBank, .investments, .pension, .realEstate]
+    // Category order for stacking (bottom → top); investments always on top
+    static let stackOrder: [AccountCategory] = [.cashAndBank, .pension, .realEstate, .investments]
 
     /// Maximum days plotted on the history chart. Raw history is never
     /// deleted; longer ranges are downsampled to stay under this budget so

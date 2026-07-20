@@ -316,11 +316,13 @@ struct NetWorthChartCard: View {
     // (The Charts API requires a `KeyValuePairs` literal, so we can't build
     // this dynamically from `allCases`.) Liabilities are excluded; the
     // history chart shows assets only.
+    // Order matches DashboardViewModel.stackOrder so the legend reads
+    // bottom-of-stack → top-of-stack.
     private static let categoryColors: KeyValuePairs<String, Color> = [
         AccountCategory.cashAndBank.rawValue: AccountCategory.cashAndBank.accentColor,
-        AccountCategory.investments.rawValue: AccountCategory.investments.accentColor,
         AccountCategory.pension.rawValue:     AccountCategory.pension.accentColor,
         AccountCategory.realEstate.rawValue:  AccountCategory.realEstate.accentColor,
+        AccountCategory.investments.rawValue: AccountCategory.investments.accentColor,
     ]
 
     var body: some View {
