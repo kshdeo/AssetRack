@@ -154,44 +154,27 @@ final class Account: Identifiable {
 
     var signedBalance: Double { isLiability ? -currentBalance : currentBalance }
 
-    /// Strict daily change badge (0.01 = 1%): today's value vs yesterday's.
-    /// Returns `nil` when nothing changed today — no badge for stale movements.
+    /// Strict daily change badge (0.01 = 1%): live balance vs the account's
+    /// value at the start of today — the most recent snapshot recorded strictly
+    /// before today. Returns `nil` when nothing changed today (or there is no
+    /// pre-today history), so no badge appears for stale movements.
     ///
-    /// - **Holdings accounts (brokerage):** sum of holdings' current value vs sum
-    ///   of holdings' `previousClose * quantity` (the prior trading session's
-    ///   close from the API), as a fraction of the account's prior total.
-    /// - **Manual accounts (cash, savings, property, liabilities):** current
-    ///   balance vs yesterday's carry-forward value (the most recent snapshot
-    ///   recorded strictly before today). An account untouched today returns
-    ///   `nil` — both sides are equal — so no badge appears.
+    /// Applies to ALL account types. Brokerage accounts work because every
+    /// ticker refresh upserts a daily balance snapshot, so yesterday's last row
+    /// is the account's value at midnight. Deliberately NOT based on holdings'
+    /// `previousClose`: each market's "previous close" anchors to a different
+    /// time of day, so mixed-market portfolios showed misaligned changes.
     ///
     /// Sign is from the balance perspective; callers flip for liabilities via
     /// `dailyChangeIsGain(_:)`.
-    func dailyChangePercent(using currency: CurrencyService) -> Double? {
-        if type.supportsHoldings {
-            var currentHoldings = 0.0
-            var priorHoldings   = 0.0
-            var hasReference    = false
-            for h in holdings where h.previousClose > 0 {
-                hasReference = true
-                currentHoldings += currency.convert(Money(h.value, h.priceCurrency), to: self.currency).amount
-                priorHoldings   += currency.convert(Money(h.previousClose * h.quantity, h.priceCurrency), to: self.currency).amount
-            }
-            guard hasReference else { return nil }
-            // Express against the account's prior total (cash is static day-over-day).
-            let base = priorHoldings + cashBalance
-            guard base > 0 else { return nil }
-            let pct = (currentHoldings - priorHoldings) / base
-            return pct == 0 ? nil : pct
-        } else {
-            let startOfToday = Calendar.current.startOfDay(for: Date())
-            guard let yesterday = balanceHistory
-                    .filter({ $0.recordedAt < startOfToday })
-                    .max(by: { $0.recordedAt < $1.recordedAt })?.balance,
-                  yesterday != 0 else { return nil }
-            let pct = (currentBalance - yesterday) / abs(yesterday)
-            return pct == 0 ? nil : pct
-        }
+    func dailyChangePercent() -> Double? {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        guard let baseline = balanceHistory
+                .filter({ $0.recordedAt < startOfToday })
+                .max(by: { $0.recordedAt < $1.recordedAt })?.balance,
+              baseline != 0 else { return nil }
+        let pct = (currentBalance - baseline) / abs(baseline)
+        return pct == 0 ? nil : pct
     }
 
     /// Interpret a change as a gain (true = green) or loss (false = red).

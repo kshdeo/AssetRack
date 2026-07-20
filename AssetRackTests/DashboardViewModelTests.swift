@@ -71,8 +71,9 @@ struct TopMoversTests {
     }
 
     @Test func excludesHoldingsAccountsWithStalePrices() {
-        // Same holdings change, but prices last fetched two days ago (market closed).
+        // Balance moved vs yesterday, but prices last fetched two days ago.
         let stale = makeAccount(in: context, type: .brokerage, balance: 1_100,
+                                history: [(1_000, daysAgo(1))],
                                 holdings: [makeHolding(quantity: 10, lastPrice: 110,
                                                        previousClose: 100, fetchedAt: daysAgo(2))])
         let vm = recalculated([stale])
@@ -81,6 +82,7 @@ struct TopMoversTests {
 
     @Test func includesHoldingsAccountsFetchedToday() {
         let fresh = makeAccount(in: context, type: .brokerage, balance: 1_100,
+                                history: [(1_000, daysAgo(1))],
                                 holdings: [makeHolding(quantity: 10, lastPrice: 110,
                                                        previousClose: 100, fetchedAt: Date())])
         let vm = recalculated([fresh])
@@ -90,6 +92,7 @@ struct TopMoversTests {
 
     @Test func excludesHoldingsAccountsNeverFetched() {
         let never = makeAccount(in: context, type: .brokerage, balance: 1_100,
+                                history: [(1_000, daysAgo(1))],
                                 holdings: [makeHolding(quantity: 10, lastPrice: 110,
                                                        previousClose: 100, fetchedAt: nil)])
         let vm = recalculated([never])
@@ -99,6 +102,7 @@ struct TopMoversTests {
     @Test func topHoldingIsTheBiggestAbsoluteMover() throws {
         // VOO: (110-100)*10 = +100; AAPL: (80-100)*10 = -200 -> AAPL drives the move.
         let account = makeAccount(in: context, type: .brokerage, balance: 1_900,
+                                  history: [(2_000, daysAgo(1))],
                                   holdings: [makeHolding(symbol: "VOO", quantity: 10, lastPrice: 110,
                                                          previousClose: 100, fetchedAt: Date()),
                                              makeHolding(symbol: "AAPL", quantity: 10, lastPrice: 80,

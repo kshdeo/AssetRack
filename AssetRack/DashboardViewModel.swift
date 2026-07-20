@@ -424,7 +424,7 @@ final class DashboardViewModel {
                         ($0.lastPriceFetchedAt ?? .distantPast) >= startOfToday
                     }) else { return nil }
                 }
-                guard let pct = account.dailyChangePercent(using: currency) else { return nil }
+                guard let pct = account.dailyChangePercent() else { return nil }
                 let balanceInBase = currency.convert(Money(account.currentBalance, account.currency), to: base).amount
                 let changeInBase = pct * balanceInBase
                 return AccountMover(account: account,

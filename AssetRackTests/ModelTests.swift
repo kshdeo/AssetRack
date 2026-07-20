@@ -227,100 +227,64 @@ struct RecomputeBalanceTests {
     }
 }
 
-// MARK: - dailyChangePercent (holdings path)
+// MARK: - dailyChangePercent
 
-@Suite("dailyChangePercent holdings")
-struct DailyChangeHoldingsTests {
+@Suite("dailyChangePercent")
+struct DailyChangePercentTests {
     let container: ModelContainer
     let context: ModelContext
-    let currency = makeCurrency()
-    init() { (container, context) = makeContext() }
-
-    @Test func basicChange() {
-        // prior 10 * 100 = 1000, current 10 * 110 = 1100 -> +10%
-        let account = makeAccount(in: context, type: .brokerage, balance: 1_100,
-                                  holdings: [makeHolding(quantity: 10, lastPrice: 110, previousClose: 100)])
-        expectClose(account.dailyChangePercent(using: currency), 0.1)
-    }
-
-    @Test func cashDilutesTheBase() {
-        // (1100 - 1000) / (1000 + 1000 cash) = 5%
-        let account = makeAccount(in: context, type: .brokerage, balance: 2_100, cash: 1_000,
-                                  holdings: [makeHolding(quantity: 10, lastPrice: 110, previousClose: 100)])
-        expectClose(account.dailyChangePercent(using: currency), 0.05)
-    }
-
-    @Test func nilWithoutAnyPreviousClose() {
-        let account = makeAccount(in: context, type: .brokerage, balance: 500,
-                                  holdings: [makeHolding(quantity: 10, lastPrice: 50, previousClose: 0)])
-        #expect(account.dailyChangePercent(using: currency) == nil)
-    }
-
-    @Test func nilWhenUnchanged() {
-        let account = makeAccount(in: context, type: .brokerage, balance: 1_000,
-                                  holdings: [makeHolding(quantity: 10, lastPrice: 100, previousClose: 100)])
-        #expect(account.dailyChangePercent(using: currency) == nil)
-    }
-
-    @Test func ignoresHoldingsWithoutReferenceClose() {
-        let account = makeAccount(in: context, type: .brokerage, balance: 160,
-                                  holdings: [makeHolding(quantity: 1, lastPrice: 110, previousClose: 100),
-                                             makeHolding(symbol: "NEW", quantity: 1, lastPrice: 50, previousClose: 0)])
-        expectClose(account.dailyChangePercent(using: currency), 0.1)
-    }
-
-    @Test func convertsHoldingCurrencyToAccountCurrency() {
-        // USD holding in a GBP account: prior 127 USD = 100 GBP, current 254 USD = 200 GBP.
-        let account = makeAccount(in: context, type: .brokerage, balance: 200,
-                                  holdings: [makeHolding(quantity: 1, lastPrice: 254,
-                                                         previousClose: 127, priceCurrency: "USD")])
-        expectClose(account.dailyChangePercent(using: currency), 1.0)
-    }
-}
-
-// MARK: - dailyChangePercent (manual path)
-
-@Suite("dailyChangePercent manual")
-struct DailyChangeManualTests {
-    let container: ModelContainer
-    let context: ModelContext
-    let currency = makeCurrency()
     init() { (container, context) = makeContext() }
 
     @Test func comparesAgainstYesterday() {
         let account = makeAccount(in: context, balance: 1_100,
                                   history: [(1_000, daysAgo(1))])
-        expectClose(account.dailyChangePercent(using: currency), 0.1)
+        expectClose(account.dailyChangePercent(), 0.1)
     }
 
     @Test func mostRecentPreTodaySnapshotWins() {
         let account = makeAccount(in: context, balance: 1_100,
                                   history: [(900, daysAgo(3)), (1_000, daysAgo(1))])
-        expectClose(account.dailyChangePercent(using: currency), 0.1)
+        expectClose(account.dailyChangePercent(), 0.1)
+    }
+
+    @Test func holdingsAccountsUseTheSnapshotBaseline() {
+        // Snapshot baseline (1000), NOT previousClose (90 * 10 = 900, which
+        // would give ~22%) — per-market session closes anchor at different
+        // times of day and misalign mixed-market portfolios.
+        let account = makeAccount(in: context, type: .brokerage, balance: 1_100,
+                                  history: [(1_000, daysAgo(1))],
+                                  holdings: [makeHolding(quantity: 10, lastPrice: 110, previousClose: 90)])
+        expectClose(account.dailyChangePercent(), 0.1)
+    }
+
+    @Test func holdingsAccountWithoutHistoryIsNil() {
+        let account = makeAccount(in: context, type: .brokerage, balance: 1_100,
+                                  holdings: [makeHolding(quantity: 10, lastPrice: 110, previousClose: 100)])
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func todaysSnapshotIsNotAReference() {
         // Only history from today -> nothing recorded strictly before today -> nil.
         let account = makeAccount(in: context, balance: 1_100,
                                   history: [(1_000, Date())])
-        #expect(account.dailyChangePercent(using: currency) == nil)
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func nilWithoutHistory() {
         let account = makeAccount(in: context, balance: 1_100)
-        #expect(account.dailyChangePercent(using: currency) == nil)
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func nilWhenYesterdayWasZero() {
         let account = makeAccount(in: context, balance: 1_100,
                                   history: [(0, daysAgo(1))])
-        #expect(account.dailyChangePercent(using: currency) == nil)
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func nilWhenUnchanged() {
         let account = makeAccount(in: context, balance: 1_000,
                                   history: [(1_000, daysAgo(1))])
-        #expect(account.dailyChangePercent(using: currency) == nil)
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func negativeChangeKeepsBalanceSign() {
@@ -328,7 +292,7 @@ struct DailyChangeManualTests {
         // callers flip via dailyChangeIsGain.
         let account = makeAccount(in: context, type: .mortgage, balance: 900,
                                   history: [(1_000, daysAgo(1))])
-        expectClose(account.dailyChangePercent(using: currency), -0.1)
+        expectClose(account.dailyChangePercent(), -0.1)
     }
 }
 
