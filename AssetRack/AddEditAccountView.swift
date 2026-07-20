@@ -37,6 +37,7 @@ struct AddEditAccountView: View {
     @State private var selectedCurrency: Currency = .usd
     @State private var balanceDate: Date = Date()
     @State private var cashBalanceText: String = ""
+    @State private var costBasisText: String = ""
     @State private var holdings: [HoldingDraft] = []
     @State private var showingAddHolding = false
     @State private var holdingToEdit: HoldingDraft?
@@ -65,16 +66,25 @@ struct AddEditAccountView: View {
         NumberParsing.userNumber(cashBalanceText) ?? 0
     }
 
-    private var holdingsTotal: String {
+    private var parsedCostBasis: Double {
+        NumberParsing.userNumber(costBasisText) ?? 0
+    }
+
+    private var holdingsTotalMoney: Money {
         let amounts: [Money] = holdings.compactMap { draft in
             guard let h = draft.existingHolding else { return nil }
             return Money(h.value, h.priceCurrency)
         } + [Money(parsedCashBalance, selectedCurrency.code)]
 
         guard let cs = currencyService else {
-            return Money(parsedCashBalance, selectedCurrency.code).formatted()
+            return Money(parsedCashBalance, selectedCurrency.code)
         }
-        return cs.formatted(cs.sum(amounts, in: selectedCurrency.code))
+        return cs.sum(amounts, in: selectedCurrency.code)
+    }
+
+    private var holdingsTotal: String {
+        guard let cs = currencyService else { return holdingsTotalMoney.formatted() }
+        return cs.formatted(holdingsTotalMoney)
     }
 
     private var showHoldingsTotal: Bool {
@@ -457,11 +467,32 @@ struct AddEditAccountView: View {
                 Text("Cash held in this account, separate from your holdings.")
             }
 
+            Section {
+                HStack {
+                    Text(selectedCurrency.symbol)
+                        .foregroundStyle(.secondary)
+                    TextField("0", text: $costBasisText)
+                        .keyboardType(.decimalPad)
+                }
+            } header: {
+                Text("Cost Basis")
+            } footer: {
+                Text("Total amount you've paid in. When set, the app shows your net profit or loss since you started.")
+            }
+
             if showHoldingsTotal {
                 Section {
                     LabeledContent("Total") {
                         Text(holdingsTotal)
                             .fontWeight(.semibold)
+                    }
+                    if parsedCostBasis > 0 {
+                        let pl = holdingsTotalMoney.amount - parsedCostBasis
+                        LabeledContent("Net P/L") {
+                            Text("\(pl >= 0 ? "+" : "−")\(currencyService?.formatted(Money(abs(pl), selectedCurrency.code)) ?? Money(abs(pl), selectedCurrency.code).formatted())")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(pl >= 0 ? .green : .red)
+                        }
                     }
                 } footer: {
                     if hasPendingPrices {
@@ -611,6 +642,7 @@ struct AddEditAccountView: View {
             let cashValue = account.cashBalance > 0 ? account.cashBalance
                 : (account.holdings.isEmpty ? account.currentBalance : 0)
             cashBalanceText = cashValue > 0 ? NumberParsing.editableString(cashValue) : ""
+            costBasisText = account.costBasis > 0 ? NumberParsing.editableString(account.costBasis) : ""
             holdings = account.holdings.map {
                 HoldingDraft(tickerSymbol: $0.tickerSymbol, quantity: $0.quantity,
                              priceSource: $0.priceSource, isin: $0.isin, existingHolding: $0)
@@ -632,6 +664,7 @@ struct AddEditAccountView: View {
             if selectedType.supportsHoldings {
                 syncHoldings(to: account)
                 account.cashBalance = parsedCashBalance
+                account.costBasis = parsedCostBasis
                 account.recomputeBalance()
             } else {
                 let balance = parsedBalance ?? 0
@@ -664,6 +697,7 @@ struct AddEditAccountView: View {
                     account.holdings.append(h)
                 }
                 account.cashBalance = parsedCashBalance
+                account.costBasis = parsedCostBasis
                 account.recomputeBalance()
             } else {
                 let balance = parsedBalance ?? 0

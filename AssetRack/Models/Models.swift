@@ -133,6 +133,8 @@ final class Account: Identifiable {
     var typeRaw: String = AccountType.checking.rawValue
     var currentBalance: Double = 0.0
     var cashBalance: Double = 0.0
+    /// Total amount the user has paid in (investment accounts). 0 = unset.
+    var costBasis: Double = 0.0
     var currency: String = "USD"
     var institution: String = ""
     var createdAt: Date = Date()
@@ -181,6 +183,13 @@ final class Account: Identifiable {
     /// Assets: up = gain. Liabilities: down (debt paid off) = gain.
     func dailyChangeIsGain(_ change: Double) -> Bool {
         isLiability ? change <= 0 : change >= 0
+    }
+
+    /// Net profit/loss vs the user-entered cost basis, in the account's own
+    /// currency. Nil when no cost basis has been entered (0 = unset).
+    var netProfitLoss: Double? {
+        guard costBasis > 0 else { return nil }
+        return currentBalance - costBasis
     }
 
     /// For brokerage accounts, balance = sum of holdings converted to account currency + cash.

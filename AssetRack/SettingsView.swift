@@ -335,6 +335,7 @@ struct SettingsView: View {
                     currency: ab.currency
                 )
                 account.cashBalance = ab.cashBalance
+                if let costBasis = ab.costBasis { account.costBasis = costBasis }
                 if let createdAt = ab.createdAt { account.createdAt = createdAt }
                 if let updatedAt = ab.updatedAt { account.updatedAt = updatedAt }
                 modelContext.insert(account)

@@ -96,6 +96,15 @@ struct AccountBasicsTests {
         #expect(asset.dailyChangeIsGain(0))
     }
 
+    @Test func netProfitLossRequiresACostBasis() {
+        let account = Account(name: "B", type: .brokerage, balance: 1_200)
+        #expect(account.netProfitLoss == nil) // costBasis unset (0)
+        account.costBasis = 1_000
+        expectClose(account.netProfitLoss, 200)
+        account.costBasis = 1_500
+        expectClose(account.netProfitLoss, -300)
+    }
+
     @Test func gainInterpretationForLiability() {
         let mortgage = Account(name: "M", type: .mortgage, balance: 0)
         #expect(mortgage.dailyChangeIsGain(-5))  // debt paid off = gain

@@ -65,7 +65,7 @@ Required by CloudKit — forgetting this causes silent sync failures.
 ### Backup format versioning
 `AppBackup` carries a `version: Int` field:
 - **v1** — accounts + holdings + currentBalance only
-- **v2** — adds `balanceHistory`, `netWorthSnapshots`, `projectionSettings`, plus previously-missing holding fields (`previousClose`, `priceSourceRaw`, `isin`, `name`, `lastPriceFetchedAt`)
+- **v2** — adds `balanceHistory`, `netWorthSnapshots`, `projectionSettings`, plus previously-missing holding fields (`previousClose`, `priceSourceRaw`, `isin`, `name`, `lastPriceFetchedAt`); later optional additions: account `costBasis`
 
 New fields are added as `Optional` so older backups decode cleanly without migration.
 

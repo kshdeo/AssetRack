@@ -12,7 +12,7 @@ import Foundation
 ///   * v2 — adds `balanceHistory`, `netWorthSnapshots`, `projectionSettings`,
 ///          plus the previously-missing holding fields
 ///          (`previousClose`, `priceSourceRaw`, `isin`, `name`,
-///           `lastPriceFetchedAt`).
+///           `lastPriceFetchedAt`). Later optional additions: `costBasis`.
 struct AppBackup: Codable {
     let version: Int
     let exportedAt: Date
@@ -50,6 +50,7 @@ struct AppBackup: Codable {
         let balanceHistory: [BalanceSnapshotBackup]?
         let createdAt: Date?
         let updatedAt: Date?
+        let costBasis: Double?
     }
 
     // MARK: Holding
@@ -137,7 +138,8 @@ extension AppBackup {
                         )
                     },
                     createdAt: account.createdAt,
-                    updatedAt: account.updatedAt
+                    updatedAt: account.updatedAt,
+                    costBasis: account.costBasis
                 )
             },
             netWorthSnapshots: netWorthSnapshots.map { s in
