@@ -170,6 +170,9 @@ final class Account: Identifiable {
     /// Sign is from the balance perspective; callers flip for liabilities via
     /// `dailyChangeIsGain(_:)`.
     func dailyChangePercent() -> Double? {
+        // No badge for accounts that haven't updated today — the math would
+        // otherwise surface a stale multi-day change as "today".
+        guard wasUpdatedToday else { return nil }
         let startOfToday = Calendar.current.startOfDay(for: Date())
         guard let baseline = balanceHistory
                 .filter({ $0.recordedAt < startOfToday })
@@ -177,6 +180,16 @@ final class Account: Identifiable {
               baseline != 0 else { return nil }
         let pct = (currentBalance - baseline) / abs(baseline)
         return pct == 0 ? nil : pct
+    }
+
+    /// True when this account's value was actually touched today: a price
+    /// fetch for holdings accounts, a balance snapshot for manual ones.
+    var wasUpdatedToday: Bool {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        if type.supportsHoldings && !holdings.isEmpty {
+            return holdings.contains { ($0.lastPriceFetchedAt ?? .distantPast) >= startOfToday }
+        }
+        return balanceHistory.contains { $0.recordedAt >= startOfToday }
     }
 
     /// Interpret a change as a gain (true = green) or loss (false = red).

@@ -415,15 +415,10 @@ final class DashboardViewModel {
 
     private func computeTopMovers(accounts: [Account], currency: CurrencyService, limit: Int = 3) -> [AccountMover] {
         let base = currency.baseCurrency
-        let startOfToday = Calendar.current.startOfDay(for: Date())
         return accounts
             .compactMap { account -> AccountMover? in
-                // Holdings accounts: skip if no price was fetched today (market closed / no data)
-                if account.type.supportsHoldings && !account.holdings.isEmpty {
-                    guard account.holdings.contains(where: {
-                        ($0.lastPriceFetchedAt ?? .distantPast) >= startOfToday
-                    }) else { return nil }
-                }
+                // dailyChangePercent is nil for accounts not updated today
+                // (stale prices, closed markets) — they drop out here.
                 guard let pct = account.dailyChangePercent() else { return nil }
                 let balanceInBase = currency.convert(Money(account.currentBalance, account.currency), to: base).amount
                 let changeInBase = pct * balanceInBase

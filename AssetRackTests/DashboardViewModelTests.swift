@@ -51,10 +51,10 @@ struct TopMoversTests {
 
     @Test func sortedByAbsoluteChangeAndCappedAtThree() {
         // Changes: A +10.1, B +240, C -210, D +52.5 (pct * current balance).
-        let a = makeAccount(in: context, name: "A", balance: 1_010, history: [(1_000, daysAgo(1))])
-        let b = makeAccount(in: context, name: "B", balance: 1_200, history: [(1_000, daysAgo(1))])
-        let c = makeAccount(in: context, name: "C", balance: 700,   history: [(1_000, daysAgo(1))])
-        let d = makeAccount(in: context, name: "D", balance: 1_050, history: [(1_000, daysAgo(1))])
+        let a = makeAccount(in: context, name: "A", balance: 1_010, history: [(1_000, daysAgo(1)), (1_010, Date())])
+        let b = makeAccount(in: context, name: "B", balance: 1_200, history: [(1_000, daysAgo(1)), (1_200, Date())])
+        let c = makeAccount(in: context, name: "C", balance: 700,   history: [(1_000, daysAgo(1)), (700, Date())])
+        let d = makeAccount(in: context, name: "D", balance: 1_050, history: [(1_000, daysAgo(1)), (1_050, Date())])
         let vm = recalculated([a, b, c, d])
 
         #expect(vm.topMovers.count == 3)
@@ -114,14 +114,15 @@ struct TopMoversTests {
     }
 
     @Test func manualAccountsHaveNoTopHolding() throws {
-        let cash = makeAccount(in: context, balance: 1_100, history: [(1_000, daysAgo(1))])
+        let cash = makeAccount(in: context, balance: 1_100,
+                               history: [(1_000, daysAgo(1)), (1_100, Date())])
         let vm = recalculated([cash])
         #expect(try #require(vm.topMovers.first).topHolding == nil)
     }
 
     @Test func liabilityDecreaseIsAGain() throws {
         let mortgage = makeAccount(in: context, type: .mortgage, balance: 900,
-                                   history: [(1_000, daysAgo(1))])
+                                   history: [(1_000, daysAgo(1)), (900, Date())])
         let vm = recalculated([mortgage])
         let mover = try #require(vm.topMovers.first)
         #expect(mover.changeAmount < 0)

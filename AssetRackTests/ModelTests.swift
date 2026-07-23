@@ -246,14 +246,22 @@ struct DailyChangePercentTests {
 
     @Test func comparesAgainstYesterday() {
         let account = makeAccount(in: context, balance: 1_100,
-                                  history: [(1_000, daysAgo(1))])
+                                  history: [(1_000, daysAgo(1)), (1_100, Date())])
         expectClose(account.dailyChangePercent(), 0.1)
     }
 
     @Test func mostRecentPreTodaySnapshotWins() {
         let account = makeAccount(in: context, balance: 1_100,
-                                  history: [(900, daysAgo(3)), (1_000, daysAgo(1))])
+                                  history: [(900, daysAgo(3)), (1_000, daysAgo(1)), (1_100, Date())])
         expectClose(account.dailyChangePercent(), 0.1)
+    }
+
+    @Test func staleAccountsShowNoChange() {
+        // Balance drifted from an old baseline but nothing was recorded today
+        // -> no badge; the change is not "today's".
+        let account = makeAccount(in: context, balance: 1_100,
+                                  history: [(1_000, daysAgo(3))])
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func holdingsAccountsUseTheSnapshotBaseline() {
@@ -262,13 +270,23 @@ struct DailyChangePercentTests {
         // times of day and misalign mixed-market portfolios.
         let account = makeAccount(in: context, type: .brokerage, balance: 1_100,
                                   history: [(1_000, daysAgo(1))],
-                                  holdings: [makeHolding(quantity: 10, lastPrice: 110, previousClose: 90)])
+                                  holdings: [makeHolding(quantity: 10, lastPrice: 110,
+                                                         previousClose: 90, fetchedAt: Date())])
         expectClose(account.dailyChangePercent(), 0.1)
+    }
+
+    @Test func holdingsAccountWithStalePricesIsNil() {
+        let account = makeAccount(in: context, type: .brokerage, balance: 1_100,
+                                  history: [(1_000, daysAgo(1))],
+                                  holdings: [makeHolding(quantity: 10, lastPrice: 110,
+                                                         previousClose: 100, fetchedAt: daysAgo(2))])
+        #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func holdingsAccountWithoutHistoryIsNil() {
         let account = makeAccount(in: context, type: .brokerage, balance: 1_100,
-                                  holdings: [makeHolding(quantity: 10, lastPrice: 110, previousClose: 100)])
+                                  holdings: [makeHolding(quantity: 10, lastPrice: 110,
+                                                         previousClose: 100, fetchedAt: Date())])
         #expect(account.dailyChangePercent() == nil)
     }
 
@@ -286,13 +304,13 @@ struct DailyChangePercentTests {
 
     @Test func nilWhenYesterdayWasZero() {
         let account = makeAccount(in: context, balance: 1_100,
-                                  history: [(0, daysAgo(1))])
+                                  history: [(0, daysAgo(1)), (1_100, Date())])
         #expect(account.dailyChangePercent() == nil)
     }
 
     @Test func nilWhenUnchanged() {
         let account = makeAccount(in: context, balance: 1_000,
-                                  history: [(1_000, daysAgo(1))])
+                                  history: [(1_000, daysAgo(1)), (1_000, Date())])
         #expect(account.dailyChangePercent() == nil)
     }
 
@@ -300,7 +318,7 @@ struct DailyChangePercentTests {
         // Sign is from the balance perspective even for liabilities;
         // callers flip via dailyChangeIsGain.
         let account = makeAccount(in: context, type: .mortgage, balance: 900,
-                                  history: [(1_000, daysAgo(1))])
+                                  history: [(1_000, daysAgo(1)), (900, Date())])
         expectClose(account.dailyChangePercent(), -0.1)
     }
 }

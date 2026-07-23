@@ -272,11 +272,30 @@ private struct YahooQuoteResponse: Decodable {
         let symbol: String
         let regularMarketPrice: Double?
         let regularMarketPreviousClose: Double?
+        let preMarketPrice: Double?
+        let postMarketPrice: Double?
+        let marketState: String?    // PREPRE / PRE / REGULAR / POST / POSTPOST / CLOSED
         let currency: String?
+
+        /// The most recent trade, including extended hours: pre-market price
+        /// during pre-market, post-market price after the close. Guarded by
+        /// `marketState` because Yahoo leaves stale pre/post prices in the
+        /// payload outside their sessions (e.g. yesterday's postMarketPrice
+        /// persists through today's regular session).
+        private var latestRawPrice: Double? {
+            switch marketState ?? "" {
+            case let s where s.hasPrefix("PRE"):
+                return preMarketPrice ?? postMarketPrice ?? regularMarketPrice
+            case let s where s.hasPrefix("POST") || s == "CLOSED":
+                return postMarketPrice ?? regularMarketPrice
+            default:
+                return regularMarketPrice
+            }
+        }
 
         /// Normalised price: GBp/GBX (pence) divided by 100 to get GBP
         var normalisedPrice: Double? {
-            guard let raw = regularMarketPrice ?? regularMarketPreviousClose else { return nil }
+            guard let raw = latestRawPrice ?? regularMarketPreviousClose else { return nil }
             return isPence ? raw / 100.0 : raw
         }
 
