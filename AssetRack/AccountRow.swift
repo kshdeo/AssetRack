@@ -19,11 +19,17 @@ struct AccountRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name)
                     .font(.subheadline.weight(.medium))
-                HStack(spacing: 4) {
-                    Text(account.type.displayName)
-                    if account.hasHoldings {
-                        Text("·")
-                        Text("^[\(account.holdings.count) holding](inflect: true)")
+                Group {
+                    HStack(spacing: 4) {
+                        Text(account.type.displayName)
+                        if account.hasHoldings {
+                            Text("·")
+                            Text("^[\(account.holdings.count) holding](inflect: true)")
+                        }
+                    }
+                    if !account.institution.isEmpty {
+                        Text(account.institution)
+                            .lineLimit(1)
                     }
                 }
                 .font(.caption)

@@ -32,7 +32,6 @@ struct AddEditAccountView: View {
     @State private var name: String = ""
     @State private var institution: String = ""
     @State private var selectedType: AccountType = .checking
-    @State private var selectedCategory: AccountCategory = .cashAndBank
     @State private var balanceText: String = ""
     @State private var selectedCurrency: Currency = .usd
     @State private var balanceDate: Date = Date()
@@ -109,6 +108,10 @@ struct AddEditAccountView: View {
             Form {
                 if !isEditing {
                     scanSection
+                }
+
+                if selectedType.supportsHoldings && showHoldingsTotal {
+                    totalSection
                 }
 
                 Section("Account Type") {
@@ -480,25 +483,29 @@ struct AddEditAccountView: View {
                 Text("Total amount you've paid in. When set, the app shows your net profit or loss since you started.")
             }
 
-            if showHoldingsTotal {
-                Section {
-                    LabeledContent("Total") {
-                        Text(holdingsTotal)
-                            .fontWeight(.semibold)
-                    }
-                    if parsedCostBasis > 0 {
-                        let pl = holdingsTotalMoney.amount - parsedCostBasis
-                        LabeledContent("Net P/L") {
-                            Text("\(pl >= 0 ? "+" : "−")\(currencyService?.formatted(Money(abs(pl), selectedCurrency.code)) ?? Money(abs(pl), selectedCurrency.code).formatted())")
-                                .fontWeight(.semibold)
-                                .foregroundStyle(pl >= 0 ? .green : .red)
-                        }
-                    }
-                } footer: {
-                    if hasPendingPrices {
-                        Text("Holdings without a fetched price are excluded from the total.")
-                    }
+        }
+    }
+
+    // MARK: - Total / Net P/L (shown at the top of the form)
+
+    @ViewBuilder
+    private var totalSection: some View {
+        Section {
+            LabeledContent("Total") {
+                Text(holdingsTotal)
+                    .fontWeight(.semibold)
+            }
+            if parsedCostBasis > 0 {
+                let pl = holdingsTotalMoney.amount - parsedCostBasis
+                LabeledContent("Net P/L") {
+                    Text("\(pl >= 0 ? "+" : "−")\(currencyService?.formatted(Money(abs(pl), selectedCurrency.code)) ?? Money(abs(pl), selectedCurrency.code).formatted())")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(pl >= 0 ? .green : .red)
                 }
+            }
+        } footer: {
+            if hasPendingPrices {
+                Text("Holdings without a fetched price are excluded from the total.")
             }
         }
     }
@@ -561,68 +568,29 @@ struct AddEditAccountView: View {
 
     @ViewBuilder
     private var accountTypePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(AccountCategory.allCases, id: \.self) { category in
-                    let isSelected = selectedCategory == category
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selectedCategory = category
-                            if selectedType.category != category {
-                                selectedType = AccountType.allCases.first { $0.category == category } ?? selectedType
-                            }
-                        }
-                    } label: {
-                        Text(category.rawValue)
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(isSelected ? Color.accentColor : Color(.secondarySystemFill),
-                                        in: Capsule())
-                            .foregroundStyle(isSelected ? Color.white : Color.primary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
-
-        ForEach(AccountType.allCases.filter { $0.category == selectedCategory }, id: \.self) { type in
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    selectedType = type
-                }
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: type.systemImage)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(type.accentColor)
-                        .frame(width: 36, height: 36)
-                        .background(
-                            type.accentColor.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 9)
-                        )
-
-                    Text(type.displayName)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    if selectedType == type {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(type.accentColor)
+        Picker(selection: $selectedType) {
+            ForEach(AccountCategory.allCases, id: \.self) { category in
+                Section(category.rawValue) {
+                    ForEach(AccountType.allCases.filter { $0.category == category }, id: \.self) { type in
+                        Text(type.displayName)
+                            .tag(type)
                     }
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .padding(.vertical, 4)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: selectedType.systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(selectedType.accentColor)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        selectedType.accentColor.opacity(0.14),
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
+                Text("Type")
+            }
         }
+        .pickerStyle(.menu)
     }
 
     // MARK: - Helpers
@@ -632,7 +600,6 @@ struct AddEditAccountView: View {
         name = account.name
         institution = account.institution
         selectedType = account.type
-        selectedCategory = account.type.category
         selectedCurrency = Currency(rawValue: account.currency) ?? .usd
 
         if account.type.supportsHoldings {
