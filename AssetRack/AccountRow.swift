@@ -47,12 +47,6 @@ struct AccountRow: View {
                     // Liabilities flip — debt going down reads as a gain (green).
                     ChangeBadge(percent: percent, isGain: account.dailyChangeIsGain(percent))
                 }
-
-                if let pl = account.netProfitLoss {
-                    Text("P/L \(pl >= 0 ? "+" : "−")\(currencyService.formatted(Money(abs(pl), account.currency)))")
-                        .font(.caption2)
-                        .foregroundStyle(pl >= 0 ? .green : .red)
-                }
             }
         }
         .padding(.vertical, 6)
