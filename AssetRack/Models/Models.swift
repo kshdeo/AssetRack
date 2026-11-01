@@ -86,6 +86,9 @@ final class Holding {
     var quantity: Double = 0.0
     var lastPrice: Double = 0.0
     var priceCurrency: String = "USD"
+    /// When this price last traded, not when the app fetched it: a Sunday refresh
+    /// stores Friday's time. Falls back to the fetch time if the source reports none.
+    /// (Older name kept to avoid a schema change.)
     var lastPriceFetchedAt: Date? = nil
     /// Identifies the data source used to fetch this holding's price.
     var priceSourceRaw: String = PriceSource.yahooFinance.rawValue
@@ -106,9 +109,13 @@ final class Holding {
     }
 
     /// Percent change from `previousClose` to `lastPrice` (0.01 = 1%).
-    /// Returns nil when there's no previous close or the change is exactly zero.
+    /// Returns nil when there's no previous close, the change is exactly zero, or
+    /// the price didn't trade today (that would be the last session's change).
     var dailyChangePercent: Double? {
         guard previousClose > 0 else { return nil }
+        if let tradedAt = lastPriceFetchedAt, tradedAt < Calendar.current.startOfDay(for: Date()) {
+            return nil
+        }
         let pct = (lastPrice - previousClose) / previousClose
         return pct == 0 ? nil : pct
     }
@@ -172,7 +179,7 @@ final class Account: Identifiable {
     func dailyChangePercent() -> Double? {
         // No badge for accounts that haven't updated today — the math would
         // otherwise surface a stale multi-day change as "today".
-        guard wasUpdatedToday else { return nil }
+        guard wasUpdatedToday() else { return nil }
         let startOfToday = Calendar.current.startOfDay(for: Date())
         guard let baseline = balanceHistory
                 .filter({ $0.recordedAt < startOfToday })
@@ -182,14 +189,22 @@ final class Account: Identifiable {
         return pct == 0 ? nil : pct
     }
 
-    /// True when this account's value was actually touched today: a price
-    /// fetch for holdings accounts, a balance snapshot for manual ones.
-    var wasUpdatedToday: Bool {
-        let startOfToday = Calendar.current.startOfDay(for: Date())
+    /// True when this account's value was actually touched today: a trade in
+    /// one of its holdings, or a balance snapshot for manual accounts.
+    func wasUpdatedToday(now: Date = Date()) -> Bool {
+        let startOfToday = Calendar.current.startOfDay(for: now)
         if type.supportsHoldings && !holdings.isEmpty {
             return holdings.contains { ($0.lastPriceFetchedAt ?? .distantPast) >= startOfToday }
         }
         return balanceHistory.contains { $0.recordedAt >= startOfToday }
+    }
+
+    /// True for a holdings account none of whose prices traded today (weekend,
+    /// holiday, or not refreshed). Its balance can still differ from the last
+    /// snapshot, e.g. Friday's closing move first seen on Sunday, but that isn't
+    /// a change from today.
+    func marketIsIdleToday(now: Date = Date()) -> Bool {
+        type.supportsHoldings && !holdings.isEmpty && !wasUpdatedToday(now: now)
     }
 
     /// Interpret a change as a gain (true = green) or loss (false = red).
@@ -336,30 +351,40 @@ enum NetWorthMath {
     /// Today's net-worth change in the base currency, matching the dashboard's
     /// "Today's gain": live signed balances vs each account's most recent
     /// pre-today snapshot (carry-forward). Accounts with no pre-today history
-    /// count fully as today's change.
+    /// count fully as today's change. Holdings accounts whose market hasn't
+    /// traded today count as unchanged (see `Account.marketIsIdleToday`).
     ///
     /// Deliberately NOT based on the `NetWorthSnapshot` trail — those rows
     /// survive account deletions, are also written for historical backfills,
     /// and bake in the FX rates of the moment they were recorded, so the most
     /// recent pre-today row is not a reliable "yesterday" baseline.
     static func todaysChange(accounts: [Account], currency: CurrencyService, now: Date = Date()) -> Double {
+        todaysChangeAndBaseline(accounts: accounts, currency: currency, now: now).change
+    }
+
+    /// `baseline` is net worth at the start of today, or nil when no account has
+    /// pre-today history.
+    static func todaysChangeAndBaseline(accounts: [Account], currency: CurrencyService, now: Date = Date()) -> (change: Double, baseline: Double?) {
         let startOfToday = Calendar.current.startOfDay(for: now)
         let base = currency.baseCurrency
-        let current = currency.sum(
-            accounts.map { Money($0.signedBalance, $0.currency) },
-            in: base
-        ).amount
-        let previous = currency.sum(
-            accounts.compactMap { account -> Money? in
-                guard let snapshot = account.balanceHistory
-                    .filter({ $0.recordedAt < startOfToday })
-                    .max(by: { $0.recordedAt < $1.recordedAt }) else { return nil }
-                let signed = account.isLiability ? -snapshot.balance : snapshot.balance
-                return Money(signed, account.currency)
-            },
-            in: base
-        ).amount
-        return current - previous
+        var current: [Money] = []
+        var previous: [Money] = []
+        for account in accounts {
+            let snapshot = account.balanceHistory
+                .filter({ $0.recordedAt < startOfToday })
+                .max(by: { $0.recordedAt < $1.recordedAt })
+            if let snapshot {
+                // Idle accounts stay in the baseline at their current value, so
+                // they add nothing to the change but still weigh in the percent.
+                let signed = account.marketIsIdleToday(now: now)
+                    ? account.signedBalance
+                    : (account.isLiability ? -snapshot.balance : snapshot.balance)
+                previous.append(Money(signed, account.currency))
+            }
+            current.append(Money(account.signedBalance, account.currency))
+        }
+        let baseline = currency.sum(previous, in: base).amount
+        return (currency.sum(current, in: base).amount - baseline, previous.isEmpty ? nil : baseline)
     }
 }
 

@@ -5,7 +5,7 @@ import Testing
 
 // All tests drive the public pipeline — recalculate(accounts:currency:) —
 // and read the cached properties, exactly as the views do.
-private func recalculated(_ accounts: [Account],
+func recalculated(_ accounts: [Account],
                           _ currency: CurrencyService = makeCurrency()) -> DashboardViewModel {
     let vm = DashboardViewModel()
     vm.recalculate(accounts: accounts, currency: currency)

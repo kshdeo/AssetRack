@@ -81,7 +81,7 @@ final class DashboardViewModel {
         historyEntries   = computeAccountHistoryEntries(accounts: accounts, currency: currency)
         allocationSegments = computeAllocationSegments(accounts: accounts, currency: currency)
         topAccounts      = computeTopAccounts(accounts: accounts)
-        todaysGain       = computeTodaysGain(historyEntries: historyEntries)
+        todaysGain       = computeTodaysGain(accounts: accounts, currency: currency)
         topMovers        = computeTopMovers(accounts: accounts, currency: currency)
         weekDelta        = computePeriodDelta(dailyTotals: dailyTotals, by: .day, value: -7)
         monthDelta       = computePeriodDelta(dailyTotals: dailyTotals, by: .month, value: -1)
@@ -366,15 +366,12 @@ final class DashboardViewModel {
 
     // MARK: - Today's gain
 
-    private func computeTodaysGain(historyEntries: [AccountHistoryEntry]) -> TodaysGain? {
-        guard historyEntries.count >= 2 else { return nil }
-        // Entries come back in descending order — [0] is today's live row, [1]
-        // is the most recent prior snapshot.
-        let today    = historyEntries[0].totalInBase
-        let previous = historyEntries[1].totalInBase
-        let amount   = today - previous
-        let percent  = previous != 0 ? amount / abs(previous) : nil
-        return TodaysGain(amount: amount, percent: percent)
+    /// Nil when nothing changed today, so a closed market shows no "today" row
+    /// at all rather than the last session's move or "+$0".
+    private func computeTodaysGain(accounts: [Account], currency: CurrencyService) -> TodaysGain? {
+        let (amount, baseline) = NetWorthMath.todaysChangeAndBaseline(accounts: accounts, currency: currency)
+        guard let baseline, abs(amount) >= 0.005 else { return nil }
+        return TodaysGain(amount: amount, percent: baseline != 0 ? amount / abs(baseline) : nil)
     }
 
     // MARK: - Period deltas
@@ -438,7 +435,7 @@ final class DashboardViewModel {
         let base = currency.baseCurrency
         return account.holdings
             .compactMap { holding -> HoldingImpact? in
-                guard holding.previousClose > 0 else { return nil }
+                guard holding.dailyChangePercent != nil else { return nil }
                 let delta = (holding.lastPrice - holding.previousClose) * holding.quantity
                 guard delta != 0 else { return nil }
                 let deltaInBase = currency.convert(Money(delta, holding.priceCurrency), to: base).amount

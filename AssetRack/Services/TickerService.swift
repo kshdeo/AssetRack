@@ -2,6 +2,34 @@ import Foundation
 import Observation
 import SwiftData
 
+/// When Tradegate last traded. Its API has no trade timestamps, so this comes
+/// from the published hours (Mon–Fri, 08:00–22:00 Berlin). Exchange holidays
+/// aren't modelled and count as trading days.
+enum TradegateSession {
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return calendar
+    }()
+
+    static func latestTradingMoment(asOf now: Date = Date()) -> Date {
+        var day = calendar.startOfDay(for: now)
+        for _ in 0..<7 {
+            if !calendar.isDateInWeekend(day),
+               let open = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day),
+               let close = calendar.date(bySettingHour: 22, minute: 0, second: 0, of: day),
+               now >= open {
+                return min(now, close)
+            }
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return now
+    }
+}
+
+typealias YahooPrice = (price: Double, previousClose: Double, currency: String, tradedAt: Date?)
+
 @Observable
 final class TickerService {
     private(set) var isLoading = false
@@ -80,7 +108,7 @@ final class TickerService {
                         holding.lastPrice = result.price
                         holding.previousClose = result.previousClose
                         holding.priceCurrency = result.currency
-                        holding.lastPriceFetchedAt = fetchedAt
+                        holding.lastPriceFetchedAt = result.tradedAt ?? fetchedAt
                         print("[TickerService] \(holding.tickerSymbol): \(result.price) \(result.currency)")
                     } else {
                         print("[TickerService] \(holding.tickerSymbol): no price in Yahoo response")
@@ -143,7 +171,7 @@ final class TickerService {
                             holding.lastPrice = quote.last
                             holding.previousClose = quote.close
                             holding.priceCurrency = "EUR"
-                            holding.lastPriceFetchedAt = Date()
+                            holding.lastPriceFetchedAt = TradegateSession.latestTradingMoment()
                         }
                         print("[TickerService] Tradegate \(holding.tickerSymbol) (\(holding.isin)): \(quote.last) EUR (prev close \(quote.close))")
                     } catch {
@@ -199,7 +227,7 @@ final class TickerService {
         return crumbString
     }
 
-    private func fetchYahooPrices(symbols: String) async throws -> [String: (price: Double, previousClose: Double, currency: String)] {
+    private func fetchYahooPrices(symbols: String) async throws -> [String: YahooPrice] {
         if crumb == nil { crumb = try await fetchCrumb() }
         print("[TickerService] Using crumb: '\(crumb ?? "nil")'")
 
@@ -229,7 +257,7 @@ final class TickerService {
             let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? 0
             print("[TickerService] Retry status: \(retryStatus)")
             guard retryStatus == 200 else { throw URLError(.badServerResponse) }
-            return try parseYahooQuotes(from: retryData)
+            return try Self.parseYahooQuotes(from: retryData)
         }
 
         guard statusCode == 200 else {
@@ -239,16 +267,16 @@ final class TickerService {
             throw URLError(.badServerResponse)
         }
 
-        return try parseYahooQuotes(from: data)
+        return try Self.parseYahooQuotes(from: data)
     }
 
-    private func parseYahooQuotes(from data: Data) throws -> [String: (price: Double, previousClose: Double, currency: String)] {
+    static func parseYahooQuotes(from data: Data) throws -> [String: YahooPrice] {
         do {
             let decoded = try JSONDecoder().decode(YahooQuoteResponse.self, from: data)
-            var result: [String: (price: Double, previousClose: Double, currency: String)] = [:]
+            var result: [String: YahooPrice] = [:]
             for quote in decoded.quoteResponse.result {
                 if let price = quote.normalisedPrice {
-                    result[quote.symbol] = (price, quote.normalisedPreviousClose ?? 0, quote.normalisedCurrency)
+                    result[quote.symbol] = (price, quote.normalisedPreviousClose ?? 0, quote.normalisedCurrency, quote.tradedAt)
                 } else {
                     print("[TickerService] \(quote.symbol): no price field in response, skipping")
                 }
@@ -299,28 +327,36 @@ private struct YahooQuoteResponse: Decodable {
         let regularMarketPreviousClose: Double?
         let preMarketPrice: Double?
         let postMarketPrice: Double?
-        let marketState: String?    // PREPRE / PRE / REGULAR / POST / POSTPOST / CLOSED
+        let regularMarketTime: TimeInterval?
+        let preMarketTime: TimeInterval?
+        let postMarketTime: TimeInterval?
         let currency: String?
 
-        /// The most recent trade, including extended hours: pre-market price
-        /// during pre-market, post-market price after the close. Guarded by
-        /// `marketState` because Yahoo leaves stale pre/post prices in the
-        /// payload outside their sessions (e.g. yesterday's postMarketPrice
-        /// persists through today's regular session).
-        private var latestRawPrice: Double? {
-            switch marketState ?? "" {
-            case let s where s.hasPrefix("PRE"):
-                return preMarketPrice ?? postMarketPrice ?? regularMarketPrice
-            case let s where s.hasPrefix("POST") || s == "CLOSED":
-                return postMarketPrice ?? regularMarketPrice
-            default:
-                return regularMarketPrice
+        /// The most recent trade across the regular, pre- and post-market
+        /// sessions, chosen by timestamp. Yahoo leaves stale pre/post prices in
+        /// the payload outside their sessions (e.g. yesterday's postMarketPrice
+        /// persists through today's regular session), so the newest time is the
+        /// only reliable signal, on weekends and holidays included.
+        private var latestTrade: (price: Double, time: Date?)? {
+            let sessions = [(regularMarketPrice, regularMarketTime),
+                            (postMarketPrice, postMarketTime),
+                            (preMarketPrice, preMarketTime)]
+            let timed = sessions.compactMap { price, time -> (Double, TimeInterval)? in
+                guard let price, let time else { return nil }
+                return (price, time)
             }
+            if let newest = timed.max(by: { $0.1 < $1.1 }) {
+                return (newest.0, Date(timeIntervalSince1970: newest.1))
+            }
+            return regularMarketPrice.map { ($0, nil) }
         }
+
+        /// When `normalisedPrice` last traded. Nil if Yahoo sent no timestamps.
+        var tradedAt: Date? { latestTrade?.time }
 
         /// Normalised price: GBp/GBX (pence) divided by 100 to get GBP
         var normalisedPrice: Double? {
-            guard let raw = latestRawPrice ?? regularMarketPreviousClose else { return nil }
+            guard let raw = latestTrade?.price ?? regularMarketPreviousClose else { return nil }
             return isPence ? raw / 100.0 : raw
         }
 

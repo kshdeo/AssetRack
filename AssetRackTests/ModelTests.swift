@@ -457,3 +457,111 @@ struct ModelContextHelperTests {
         #expect(account.balanceHistory.count == 1)
     }
 }
+
+// MARK: - Closed markets
+
+@Suite("Closed markets")
+struct ClosedMarketTests {
+    let container: ModelContainer
+    let context: ModelContext
+    let currency = makeCurrency()
+    init() { (container, context) = makeContext() }
+
+    /// A brokerage whose balance moved since its last snapshot, as when Friday's
+    /// closing move is first picked up on Sunday.
+    private func brokerage(tradedAt: Date) -> Account {
+        makeAccount(in: context, type: .brokerage, balance: 1_100,
+                    history: [(1_000, daysAgo(2))],
+                    holdings: [makeHolding(quantity: 10, lastPrice: 110,
+                                           previousClose: 112, fetchedAt: tradedAt)])
+    }
+
+    @Test func movementFromAnEarlierSessionIsNotTodaysChange() {
+        let account = brokerage(tradedAt: daysAgo(2))
+        #expect(account.marketIsIdleToday())
+        #expect(account.dailyChangePercent() == nil)
+        #expect(account.holdings[0].dailyChangePercent == nil)
+        expectClose(NetWorthMath.todaysChange(accounts: [account], currency: currency), 0)
+        #expect(recalculated([account]).todaysGain == nil)
+        #expect(recalculated([account]).topMovers.isEmpty)
+    }
+
+    @Test func aTradeTodayStillCounts() throws {
+        // e.g. crypto on a weekend.
+        let account = brokerage(tradedAt: Date())
+        #expect(!account.marketIsIdleToday())
+        expectClose(NetWorthMath.todaysChange(accounts: [account], currency: currency), 100)
+        expectClose(try #require(recalculated([account]).todaysGain).amount, 100)
+    }
+
+    @Test func manualChangeStillCountsWhileTheMarketIsClosed() throws {
+        let closed = brokerage(tradedAt: daysAgo(2))
+        let cash = makeAccount(in: context, balance: 550, history: [(500, daysAgo(1))])
+        let gain = try #require(recalculated([closed, cash]).todaysGain)
+        expectClose(gain.amount, 50)
+        // The idle 1,100 brokerage still counts toward the percent: 50 / 1,600.
+        expectClose(gain.percent, 0.03125)
+    }
+
+    @Test func holdingsAccountAddedTodayStillCountsFully() {
+        let fresh = makeAccount(in: context, type: .brokerage, balance: 500,
+                                holdings: [makeHolding(quantity: 5, lastPrice: 100, fetchedAt: daysAgo(2))])
+        expectClose(NetWorthMath.todaysChange(accounts: [fresh], currency: currency), 500)
+    }
+}
+
+// MARK: - Latest trade
+
+@Suite("Latest trade")
+struct LatestTradeTests {
+    private let friday = 1_793_404_799.0   // Fri 30 Oct 2026 23:59:59 UTC
+    private let thursday = 1_793_318_399.0 // Thu 29 Oct 2026 23:59:59 UTC
+
+    private func parse(_ quote: String) throws -> YahooPrice {
+        let json = #"{"quoteResponse":{"result":[{"symbol":"X","currency":"USD",\#(quote)}]}}"#
+        return try #require(try TickerService.parseYahooQuotes(from: Data(json.utf8))["X"])
+    }
+
+    @Test func weekendUsesFridaysPostMarketTradeAndItsTime() throws {
+        // Shape of a real AAPL response on a Sunday.
+        let price = try parse("""
+            "marketState":"CLOSED","regularMarketPrice":344.63,"regularMarketTime":\(friday - 14_000),\
+            "regularMarketPreviousClose":348.91,"postMarketPrice":345.1,"postMarketTime":\(friday)
+            """)
+        #expect(price.price == 345.1)
+        #expect(price.tradedAt == Date(timeIntervalSince1970: friday))
+    }
+
+    @Test func staleExtendedHoursPricesAreIgnored() throws {
+        let price = try parse("""
+            "marketState":"PREPRE","regularMarketPrice":100,"regularMarketTime":\(friday),\
+            "preMarketPrice":90,"preMarketTime":\(thursday),"postMarketPrice":95,"postMarketTime":\(thursday)
+            """)
+        #expect(price.price == 100)
+        #expect(price.tradedAt == Date(timeIntervalSince1970: friday))
+    }
+
+    @Test func missingTimestampsFallBackToTheRegularPrice() throws {
+        let price = try parse(#""regularMarketPrice":100,"postMarketPrice":95"#)
+        #expect(price.price == 100)
+        #expect(price.tradedAt == nil)
+    }
+
+    private func berlin(month: Int = 11, _ day: Int, _ hour: Int) -> Date {
+        var components = DateComponents(year: 2026, month: month, day: day, hour: hour)
+        components.timeZone = TimeZone(identifier: "Europe/Berlin")
+        return Calendar(identifier: .gregorian).date(from: components)!
+    }
+
+    @Test func tradegateIsIdleFromFridaysCloseUntilMondaysOpen() {
+        let fridayClose = berlin(month: 10, 30, 22)
+        #expect(TradegateSession.latestTradingMoment(asOf: berlin(1, 12)) == fridayClose) // Sunday
+        #expect(TradegateSession.latestTradingMoment(asOf: berlin(2, 7)) == fridayClose)  // Monday pre-open
+    }
+
+    @Test func tradegateTradesDuringTheSession() {
+        let wednesdayNoon = berlin(4, 12)
+        #expect(TradegateSession.latestTradingMoment(asOf: wednesdayNoon) == wednesdayNoon)
+        #expect(TradegateSession.latestTradingMoment(asOf: berlin(4, 23)) == berlin(4, 22))
+    }
+}

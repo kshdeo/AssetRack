@@ -272,6 +272,9 @@ account.setBalanceSnapshot(balance: balance, at: date)
 - Carry-forward is computed with a single sorted walk per account (walking pointer), never by filtering full history per day — the latter goes quadratic as history grows
 - The history chart is range-filtered (`HistoryRange`: 3M/1Y/All, persisted in `@AppStorage("history_chart_range")`) and downsampled to `DashboardViewModel.chartPointBudget` (~150) points; raw snapshots are never deleted. Period deltas (w/w, m/m, y/y) always use the full series, independent of the chart range
 
+### Today's change and closed markets
+"Today" means something traded today. Holdings store the time of their latest trade in `lastPriceFetchedAt`: Yahoo's newest session timestamp, or `TradegateSession` (published hours, no holiday calendar) because Tradegate's API has no timestamps. A holdings account with no trade today (`Account.marketIsIdleToday`) has no badge, isn't a mover, and counts as unchanged in `NetWorthMath.todaysChange`, which feeds the hero and the widget. If nothing changed, the hero's "today" row is hidden. 24/7 assets like crypto keep showing changes, and manual balance edits still count. The first session after a gap is still measured from the last recorded snapshot, so it can include a late move from the previous session.
+
 ### History navigation flow
 1. `NetWorthHistoryView` — list of dates with total net worth; "+" opens `AddHistoricalEntryView`
 2. Tap a date → `HistoryDayDetailView` — per-account rows; today's entry is read-only
