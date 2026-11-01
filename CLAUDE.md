@@ -9,7 +9,7 @@ AssetRack is an iOS Net Worth Tracker — a personal finance app for tracking **
 
 ## Architecture
 - **Models** – `Account`, `Holding`, `BalanceSnapshot`, `NetWorthSnapshot`, `ProjectionSettings` (`@Model`)
-- **Services** – `CurrencyService` (FX rates, currency arithmetic, formatting), `TickerService` (Yahoo Finance + Tradegate prices), `ISINLookupService` (Finnhub + Tradegate search, live price preview), `ProjectionService` (pure-growth net worth projection), `StatementScanner` (OCR + Apple Intelligence structured extraction from bank screenshots, iOS 26+), `BiometricLockService` (LocalAuthentication-based app lock)
+- **Services** – `CurrencyService` (FX rates, currency arithmetic, formatting), `TickerService` (Yahoo Finance + Tradegate prices), `ISINLookupService` (Finnhub search via the Firebase proxy, Tradegate search, live price preview), `FirebaseBootstrap` (App Check + Firebase startup), `ConfigService` (Remote Config flags), `ProjectionService` (pure-growth net worth projection), `StatementScanner` (OCR + Apple Intelligence structured extraction from bank screenshots, iOS 26+), `BiometricLockService` (LocalAuthentication-based app lock)
 - **ViewModels** – `DashboardViewModel` (`@Observable`) computes chart/history data
 - **Views** – `DashboardView`, `AccountsListView`, `AccountRow`, `AddEditAccountView`, `AccountBalanceHistoryView`, `AddHistoricalEntryView`, `SettingsView`, `ProjectionView`, `OnboardingView`, `LockView`
 - **Tests** – `CurrencyServiceTests` (20 tests, Swift Testing framework)
@@ -36,7 +36,7 @@ AssetRack is an iOS Net Worth Tracker — a personal finance app for tracking **
 - **Swift Charts** — built-in from iOS 16, handles area charts, interactive scrubbing
 - **LocalAuthentication** — biometric lock (Face ID / Touch ID / passcode fallback) in `BiometricLockService`
 - **Vision + FoundationModels** — `StatementScanner` uses `VNRecognizeTextRequest` for OCR then Apple Intelligence (`FoundationModels`, iOS 26+) for structured extraction. Guarded by `#if canImport(FoundationModels)` + `@available(iOS 26.0, *)` so the rest of the app builds on 18.2.
-- **No third-party dependencies in Phase 1** — only planned third-party integration is Plaid (Phase 2, requires backend)
+- **Firebase (SPM, pinned to 12.14.x)** — App Check, Remote Config and Functions only, no Analytics. 12.14 is the newest release that resolves on Xcode 16.2 (later ones need Swift tools 6.1+). Other than Firebase, the only planned third-party integration is Plaid (Phase 2, requires backend)
 
 ## Data Model Design Decisions
 
@@ -283,6 +283,13 @@ account.setBalanceSnapshot(balance: balance, at: date)
 - `ProjectionService.project(over:accounts:settings:currency:)` — pure function, returns `[ProjectionPoint]` at monthly granularity. Standard annuity formula per asset category: `FV = PV * (1+r)^t + PMT * ((1+r)^t − 1)/r`. V2 routes net monthly savings (income − expenses) into Investments as the PMT stream; negative net drains investments. Other categories pure-grow. Liabilities amortise linearly to zero. Values floor at 0.
 - `ProjectionView` — horizon picker (1/5/10/20/30y), summary card with cash-flow subtitle, stacked-area chart with net worth line, per-category breakdown, "Assumptions" sheet for editing rates and monthly cash flow.
 - Dashboard `ProjectionTeaserCard` shows the projected value at the saved horizon and navigates to the full view.
+
+### Firebase
+- `functions/` (TypeScript) has the callable `search`, which proxies Finnhub `/api/v1/search`. It enforces App Check, reads `FINNHUB_API_KEY` from Secret Manager, caches for an hour, and limits Finnhub calls to 50 a minute. `maxInstances: 1` keeps the cache and limiter global. Test with `npm test` in `functions/`. No API keys in the app.
+- `GoogleService-Info.plist` belongs in `AssetRack/AssetRack/` (picked up automatically by the synced folder) and is gitignored. Without it the app still builds and runs: `FirebaseBootstrap.isConfigured` stays false, Remote Config stays on defaults, and Yahoo search shows "isn't available" while manual ticker entry keeps working.
+- Remote Config keys: `min_supported_version` (string; older versions see a dismissible prompt, never a block) and `finnhub_search_enabled` (bool; hides Yahoo search). Add new keys in `ConfigService`, with an in-app default.
+- App Check: App Attest on Release device builds, debug provider in DEBUG and the simulator (register the token it prints in the Firebase console).
+- The function region is set in both `functions/src/index.ts` and `ISINLookupService.functionsRegion`.
 
 ### Pull-to-refresh
 Wrapped in `Task { @MainActor in }` to avoid `-999 NSURLErrorDomain cancelled` from SwiftUI's cooperative cancellation propagating into URLSession.

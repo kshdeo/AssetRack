@@ -23,3 +23,10 @@ build/
 
 # SPM
 .build/
+
+# Firebase
+GoogleService-Info.plist
+.firebase/
+firebase-debug.log
+functions/node_modules/
+functions/lib/

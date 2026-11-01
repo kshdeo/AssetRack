@@ -8,6 +8,7 @@ struct AssetRackApp: App {
     let lockService = BiometricLockService()
 
     init() {
+        FirebaseBootstrap.configure()
         let schema = Schema([Account.self, Holding.self, BalanceSnapshot.self, NetWorthSnapshot.self, ProjectionSettings.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
@@ -35,6 +36,9 @@ struct AssetRackApp: App {
                 .environment(lockService)
                 .onAppear {
                     BackgroundRefreshService.scheduleNext()
+                }
+                .task {
+                    await ConfigService.shared.fetchAndActivate()
                 }
         }
         .modelContainer(container)

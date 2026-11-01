@@ -1,3 +1,4 @@
+import FirebaseFunctions
 import Foundation
 
 // MARK: - Result type
@@ -21,13 +22,8 @@ struct StockSearchResult: Identifiable {
 
 struct ISINLookupService {
 
-    static let apiKeyDefaultsKey = "finnhub_api_key"
-    private static let fallbackApiKey = "d89j4e9r01qspkc76kq0d89j4e9r01qspkc76kqg"
-
-    /// Returns the user-configured key if set, otherwise the built-in fallback.
-    static func effectiveApiKey(userKey: String) -> String {
-        userKey.isEmpty ? fallbackApiKey : userKey
-    }
+    /// Keep in sync with the region in functions/src/index.ts.
+    private static let functionsRegion = "europe-west1"
 
     // MARK: - Tradegate search (returns ISIN directly in results)
 
@@ -146,19 +142,29 @@ struct ISINLookupService {
 
     // MARK: - Finnhub search (for Yahoo Finance symbol discovery)
 
-    /// Search for securities by name or ticker via Finnhub.
-    func search(query: String, apiKey: String) async throws -> [StockSearchResult] {
-        guard !apiKey.isEmpty else { throw LookupError.noAPIKey }
-        var components = URLComponents(string: "https://finnhub.io/api/v1/search")!
-        components.queryItems = [
-            URLQueryItem(name: "q",     value: query),
-            URLQueryItem(name: "token", value: apiKey)
-        ]
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw URLError(.badServerResponse)
+    /// Search for securities by name or ticker through the `search` Cloud
+    /// Function, which holds the Finnhub key. The Functions SDK attaches the App
+    /// Check token the function requires.
+    func search(query: String) async throws -> [StockSearchResult] {
+        guard FirebaseBootstrap.isConfigured else { throw LookupError.searchUnavailable }
+        let callable = Functions.functions(region: Self.functionsRegion).httpsCallable(
+            "search",
+            requestAs: FinnhubSearchRequest.self,
+            responseAs: FinnhubSearchResponse.self
+        )
+        let decoded: FinnhubSearchResponse
+        do {
+            decoded = try await callable.call(FinnhubSearchRequest(q: query))
+        } catch {
+            // A newer keystroke superseded this search — not an error.
+            if Task.isCancelled { throw CancellationError() }
+            let nsError = error as NSError
+            if nsError.domain == FunctionsErrorDomain,
+               nsError.code == FunctionsErrorCode.resourceExhausted.rawValue {
+                throw LookupError.tooManySearches
+            }
+            throw LookupError.searchUnavailable
         }
-        let decoded = try JSONDecoder().decode(FinnhubSearchResponse.self, from: data)
         return decoded.result.map {
             StockSearchResult(
                 symbol: $0.symbol,
@@ -224,9 +230,13 @@ struct ISINLookupService {
     // MARK: - Errors
 
     enum LookupError: LocalizedError {
-        case noAPIKey
+        case searchUnavailable
+        case tooManySearches
         var errorDescription: String? {
-            "No Finnhub API key configured. Add one in Settings."
+            switch self {
+            case .searchUnavailable: return "Search isn't available right now. You can still enter the ticker below."
+            case .tooManySearches:   return "Too many searches. Try again shortly."
+            }
         }
     }
 
@@ -270,6 +280,10 @@ private struct YahooChartResponse: Decodable {
             }
         }
     }
+}
+
+private struct FinnhubSearchRequest: Encodable {
+    let q: String
 }
 
 private struct FinnhubSearchResponse: Decodable {

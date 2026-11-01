@@ -8,7 +8,6 @@ struct SettingsView: View {
 
     @Environment(BiometricLockService.self) private var lockService
     @AppStorage(TickerService.refreshIntervalKey) private var refreshIntervalMinutes = 60
-    @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     // Export
@@ -98,22 +97,6 @@ struct SettingsView: View {
                     } else {
                         Text("Set up a passcode in iPhone Settings to enable the app lock.")
                     }
-                }
-
-                // MARK: Integrations
-                Section {
-                    HStack {
-                        Text("Finnhub API Key")
-                        Spacer()
-                        SecureField("Paste key here", text: $finnhubApiKey)
-                            .multilineTextAlignment(.trailing)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                    }
-                } header: {
-                    Text("Integrations")
-                } footer: {
-                    Text("Used to search securities and auto-fill ISINs when adding Tradegate holdings. Get a free key at finnhub.io.")
                 }
 
                 // MARK: Data

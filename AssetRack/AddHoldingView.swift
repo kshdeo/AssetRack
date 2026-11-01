@@ -94,7 +94,6 @@ struct HoldingPriceView: View {
 
 struct AddHoldingView: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(ISINLookupService.apiKeyDefaultsKey) private var finnhubApiKey = ""
 
     var existing: HoldingDraft?
     var onSave: (HoldingDraft) -> Void
@@ -152,8 +151,10 @@ struct AddHoldingView: View {
                     searchError = nil
                 }
 
-                searchSection
-                searchResultsSection
+                if showsSearch {
+                    searchSection
+                    searchResultsSection
+                }
                 tickerQuantitySection
             }
             // Trim the default gap above the first section — the segmented
@@ -264,6 +265,12 @@ struct AddHoldingView: View {
 
     // MARK: - Shared search UI
 
+    /// Tradegate search goes straight to Tradegate; only the Yahoo one depends
+    /// on the Firebase proxy, so only it follows the remote kill switch.
+    private var showsSearch: Bool {
+        priceSource == .tradegate || ConfigService.shared.finnhubSearchEnabled
+    }
+
     /// Search input + status footer. Reused by both Yahoo (Finnhub-backed)
     /// and Tradegate. The placeholder adapts to the active source.
     private var searchSection: some View {
@@ -360,8 +367,7 @@ struct AddHoldingView: View {
                 // Tradegate HTML search — returns ISINs directly, no API key needed
                 searchResults = try await lookupService.searchTradegate(query: query)
             case .yahooFinance:
-                let key = ISINLookupService.effectiveApiKey(userKey: finnhubApiKey)
-                searchResults = try await lookupService.search(query: query, apiKey: key)
+                searchResults = try await lookupService.search(query: query)
             }
         } catch is CancellationError {
             // A newer search superseded this one — not an error
