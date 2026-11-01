@@ -6,6 +6,7 @@ import BackgroundTasks
 struct AssetRackApp: App {
     let container: ModelContainer
     let lockService = BiometricLockService()
+    let demoMode = DemoMode()
 
     init() {
         let schema = Schema([Account.self, Holding.self, BalanceSnapshot.self, NetWorthSnapshot.self, ProjectionSettings.self])
@@ -31,12 +32,26 @@ struct AssetRackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppRootView(container: container)
                 .environment(lockService)
+                .environment(demoMode)
                 .onAppear {
                     BackgroundRefreshService.scheduleNext()
                 }
         }
-        .modelContainer(container)
+    }
+}
+
+/// Points the whole view tree at the real store or the demo session's in-memory
+/// one. The `.id` rebuilds the tree on a swap so view-owned services
+/// (`CurrencyService`, `TickerService`) are recreated for the right mode.
+private struct AppRootView: View {
+    let container: ModelContainer
+    @Environment(DemoMode.self) private var demoMode
+
+    var body: some View {
+        ContentView()
+            .id(demoMode.isActive)
+            .modelContainer(demoMode.container ?? container)
     }
 }

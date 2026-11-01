@@ -13,7 +13,8 @@ struct WidgetDataStore {
     }
 
     static func update(netWorth: Double, dailyChange: Double, currency: String) {
-        guard let d = defaults else { return }
+        // Sample numbers must never reach the home screen.
+        guard !DemoMode.sessionActive, let d = defaults else { return }
         d.set(netWorth,     forKey: "widget_net_worth")
         d.set(dailyChange,  forKey: "widget_daily_change")
         d.set(currency,     forKey: "widget_currency")

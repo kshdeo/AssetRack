@@ -13,6 +13,10 @@ final class CurrencyService {
     var baseCurrency: String {
         didSet {
             guard baseCurrency != oldValue else { return }
+            if isDemo {
+                rates = DemoMarket.rates(base: baseCurrency)
+                return
+            }
             UserDefaults.standard.set(baseCurrency, forKey: baseCurrencyKey)
             rates = [:]
             lastFetched = nil
@@ -23,14 +27,32 @@ final class CurrencyService {
     private let baseCurrencyKey = "fx_base_currency"
     private let cacheKey = "fx_rates"
     private let fetchedAtKey = "fx_rates_fetched_at"
+    /// Fixed sample rates, no network, and no reads or writes of the user's saved FX settings.
+    private let isDemo: Bool
 
     init() {
+        isDemo = DemoMode.sessionActive
+        if isDemo {
+            baseCurrency = DemoMarket.baseCurrency
+            rates = DemoMarket.rates(base: DemoMarket.baseCurrency)
+            lastFetched = Date()
+            return
+        }
         baseCurrency = UserDefaults.standard.string(forKey: "fx_base_currency") ?? "USD"
         loadCache()
     }
 
+    /// Demo-mode service regardless of session state — for seeding sample data and tests.
+    init(demoBaseCurrency: String) {
+        isDemo = true
+        baseCurrency = demoBaseCurrency
+        rates = DemoMarket.rates(base: demoBaseCurrency)
+        lastFetched = Date()
+    }
+
     /// Initialiser for unit tests — bypasses network fetch and UserDefaults.
     init(baseCurrency: String, rates: [String: Double]) {
+        isDemo = false
         self.baseCurrency = baseCurrency
         self.rates = rates
     }
@@ -43,6 +65,10 @@ final class CurrencyService {
     }
 
     func fetch() async {
+        if isDemo {
+            lastFetched = Date()
+            return
+        }
         debugPrint("[CurrencyService] Fetching rates (base: \(baseCurrency))")
         isLoading = true
         error = nil
@@ -107,6 +133,7 @@ final class CurrencyService {
     // MARK: - Private
 
     private var shouldFetch: Bool {
+        guard !isDemo else { return false }
         guard let last = lastFetched else { return true }
         return Date().timeIntervalSince(last) > 86_400
     }

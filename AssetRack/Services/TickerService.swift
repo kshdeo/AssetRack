@@ -12,9 +12,14 @@ final class TickerService {
 
     private let fetchedAtKey = "ticker_last_fetched"
     private var crumb: String?
+    /// Sample prices instead of network calls; the fetch time isn't persisted either.
+    private let isDemo: Bool
 
-    init() {
-        lastFetched = UserDefaults.standard.object(forKey: fetchedAtKey) as? Date
+    init(isDemo: Bool = DemoMode.sessionActive) {
+        self.isDemo = isDemo
+        if !isDemo {
+            lastFetched = UserDefaults.standard.object(forKey: fetchedAtKey) as? Date
+        }
     }
 
     @MainActor
@@ -42,6 +47,21 @@ final class TickerService {
         isLoading = true
         errors = [:]
         defer { isLoading = false }
+
+        if isDemo {
+            let fetchedAt = Date()
+            for holding in allHoldings {
+                let quote = DemoMarket.quote(symbol: holding.tickerSymbol, isin: holding.isin, source: holding.priceSource)
+                holding.lastPrice = quote.price
+                holding.previousClose = quote.previousClose
+                holding.priceCurrency = quote.currency
+                holding.lastPriceFetchedAt = fetchedAt
+            }
+            recomputeBrokerageBalances(accounts, currency: currency)
+            lastFetched = fetchedAt
+            try? context.save()
+            return
+        }
 
         let yahooHoldings     = allHoldings.filter { $0.priceSource == .yahooFinance }
         let tradegateHoldings = allHoldings.filter { $0.priceSource == .tradegate }
@@ -75,17 +95,7 @@ final class TickerService {
                 await fetchTradegatePrices(tradegateHoldings)
             }
 
-            // Recompute balances and record snapshots for all brokerage accounts.
-            // `setBalanceSnapshot` upserts per calendar day — refreshing twice
-            // in one day updates the day's row instead of adding a duplicate.
-            for account in accounts where account.type.supportsHoldings {
-                let oldBalance = account.currentBalance
-                account.recomputeBalance(convert: currency.convert)
-                if abs(account.currentBalance - oldBalance) > 0.01 {
-                    account.setBalanceSnapshot(balance: account.currentBalance)
-                    account.updatedAt = Date()
-                }
-            }
+            recomputeBrokerageBalances(accounts, currency: currency)
 
             lastFetched = Date()
             UserDefaults.standard.set(lastFetched, forKey: fetchedAtKey)
@@ -98,6 +108,21 @@ final class TickerService {
             print("[TickerService] Yahoo Finance fetch failed: \(error)")
             for holding in yahooHoldings {
                 errors[holding.tickerSymbol] = "Could not fetch price"
+            }
+        }
+    }
+
+    /// Recompute balances and record snapshots for all brokerage accounts.
+    /// `setBalanceSnapshot` upserts per calendar day — refreshing twice
+    /// in one day updates the day's row instead of adding a duplicate.
+    @MainActor
+    private func recomputeBrokerageBalances(_ accounts: [Account], currency: CurrencyService) {
+        for account in accounts where account.type.supportsHoldings {
+            let oldBalance = account.currentBalance
+            account.recomputeBalance(convert: currency.convert)
+            if abs(account.currentBalance - oldBalance) > 0.01 {
+                account.setBalanceSnapshot(balance: account.currentBalance)
+                account.updatedAt = Date()
             }
         }
     }

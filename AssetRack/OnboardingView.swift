@@ -7,6 +7,7 @@ import SwiftUI
 /// onboarding hidden on every subsequent launch.
 struct OnboardingView: View {
     @Binding var isCompleted: Bool
+    @Environment(DemoMode.self) private var demoMode
     @State private var currentPage = 0
 
     private let pages: [OnboardingPage.Content] = [
@@ -69,8 +70,15 @@ struct OnboardingView: View {
                         .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 24)
+
+                Button("Try with sample data", action: demoMode.enter)
+                    .font(.subheadline.weight(.medium))
+
+                if let error = demoMode.startError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
             }
-            .padding(.bottom, 40)
+            .padding(.bottom, 24)
         }
         .overlay(alignment: .topTrailing) {
             if !isLastPage {
@@ -168,7 +176,7 @@ struct OnboardingPage: View {
             }
 
             Spacer(minLength: 24)
-            Spacer().frame(height: 112)   // clear space for the action chrome
+            Spacer().frame(height: 148)   // clear space for the action chrome
         }
     }
 
@@ -216,4 +224,5 @@ struct OnboardingPage: View {
 
 #Preview("Onboarding") {
     OnboardingView(isCompleted: .constant(false))
+        .environment(DemoMode())
 }

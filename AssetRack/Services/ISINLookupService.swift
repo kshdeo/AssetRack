@@ -34,6 +34,7 @@ struct ISINLookupService {
     /// Search Tradegate Exchange by name or ticker.
     /// ISINs are parsed directly from the search results page — no second call needed.
     func searchTradegate(query: String) async throws -> [StockSearchResult] {
+        if DemoMode.sessionActive { return DemoMarket.search(query: query) }
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return []
         }
@@ -148,6 +149,7 @@ struct ISINLookupService {
 
     /// Search for securities by name or ticker via Finnhub.
     func search(query: String, apiKey: String) async throws -> [StockSearchResult] {
+        if DemoMode.sessionActive { return DemoMarket.search(query: query) }
         guard !apiKey.isEmpty else { throw LookupError.noAPIKey }
         var components = URLComponents(string: "https://finnhub.io/api/v1/search")!
         components.queryItems = [
@@ -176,6 +178,10 @@ struct ISINLookupService {
     /// Yahoo Finance uses the v8 chart API (no crumb required).
     /// Tradegate uses the refresh.php ISIN endpoint.
     func previewPrice(symbol: String, source: PriceSource, isin: String) async throws -> (price: Double, currency: String) {
+        if DemoMode.sessionActive {
+            let quote = DemoMarket.quote(symbol: symbol, isin: isin, source: source)
+            return (quote.price, quote.currency)
+        }
         switch source {
         case .tradegate:
             guard !isin.isEmpty else { throw PreviewError.missingIdentifier }
