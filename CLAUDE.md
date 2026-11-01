@@ -294,6 +294,11 @@ account.setBalanceSnapshot(balance: balance, at: date)
 ### Pull-to-refresh
 Wrapped in `Task { @MainActor in }` to avoid `-999 NSURLErrorDomain cancelled` from SwiftUI's cooperative cancellation propagating into URLSession.
 
+### Demo mode
+`DemoMode` (`@Observable`, injected at the App level) runs a "Try with sample data" session, entered from onboarding or Settings. `AppRootView` swaps the whole tree onto `ModelContainer.makeDemoContainer()`: in-memory, `cloudKitDatabase: .none`, seeded by `seedSampleData(into:)`. Nothing persists across relaunch or exit, and the onboarding flag is untouched.
+- Non-view services read `DemoMode.sessionActive`: `CurrencyService`/`TickerService` capture it at init and use `DemoMarket` (no network, no `UserDefaults`); `ISINLookupService` returns `DemoMarket` results before reaching the Firebase proxy; `ConfigService` skips fetching and the update prompt; `WidgetDataStore.update` and `BackgroundRefreshService.run` no-op.
+- Settings hides sections that write real settings or backups (prices, security, integrations, data, welcome tour). Any new network call, widget write or real-settings control needs the same guard.
+
 ### Previews
 `ModelContainer.previewContainer` — in-memory, pre-seeded with mock accounts and snapshots. Used in all `#Preview` blocks.
 `ModelContainer.appContainer` — production CloudKit-backed container, used only in `AssetRackApp.swift`.

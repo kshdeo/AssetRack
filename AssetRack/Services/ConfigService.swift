@@ -22,6 +22,7 @@ final class ConfigService {
     private(set) var finnhubSearchEnabled = ConfigService.defaultFinnhubSearchEnabled
 
     var isUpdateRequired: Bool {
+        guard !DemoMode.sessionActive else { return false }
         let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         return Self.isVersion(current, olderThan: minSupportedVersion)
     }
@@ -29,7 +30,7 @@ final class ConfigService {
     /// Call once at launch.
     @MainActor
     func fetchAndActivate() async {
-        guard FirebaseBootstrap.isConfigured else { return }
+        guard FirebaseBootstrap.isConfigured, !DemoMode.sessionActive else { return }
         let remoteConfig = RemoteConfig.remoteConfig()
         let settings = RemoteConfigSettings()
         #if DEBUG

@@ -30,6 +30,7 @@ struct ISINLookupService {
     /// Search Tradegate Exchange by name or ticker.
     /// ISINs are parsed directly from the search results page — no second call needed.
     func searchTradegate(query: String) async throws -> [StockSearchResult] {
+        if DemoMode.sessionActive { return DemoMarket.search(query: query) }
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return []
         }
@@ -146,6 +147,7 @@ struct ISINLookupService {
     /// Function, which holds the Finnhub key. The Functions SDK attaches the App
     /// Check token the function requires.
     func search(query: String) async throws -> [StockSearchResult] {
+        if DemoMode.sessionActive { return DemoMarket.search(query: query) }
         guard FirebaseBootstrap.isConfigured else { throw LookupError.searchUnavailable }
         let callable = Functions.functions(region: Self.functionsRegion).httpsCallable(
             "search",
@@ -182,6 +184,10 @@ struct ISINLookupService {
     /// Yahoo Finance uses the v8 chart API (no crumb required).
     /// Tradegate uses the refresh.php ISIN endpoint.
     func previewPrice(symbol: String, source: PriceSource, isin: String) async throws -> (price: Double, currency: String) {
+        if DemoMode.sessionActive {
+            let quote = DemoMarket.quote(symbol: symbol, isin: isin, source: source)
+            return (quote.price, quote.currency)
+        }
         switch source {
         case .tradegate:
             guard !isin.isEmpty else { throw PreviewError.missingIdentifier }

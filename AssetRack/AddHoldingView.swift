@@ -266,9 +266,10 @@ struct AddHoldingView: View {
     // MARK: - Shared search UI
 
     /// Tradegate search goes straight to Tradegate; only the Yahoo one depends
-    /// on the Firebase proxy, so only it follows the remote kill switch.
+    /// on the Firebase proxy, so only it follows the remote kill switch. Demo
+    /// search is local, so the switch doesn't apply there.
     private var showsSearch: Bool {
-        priceSource == .tradegate || ConfigService.shared.finnhubSearchEnabled
+        priceSource == .tradegate || DemoMode.sessionActive || ConfigService.shared.finnhubSearchEnabled
     }
 
     /// Search input + status footer. Reused by both Yahoo (Finnhub-backed)

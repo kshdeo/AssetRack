@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Bindable var currency: CurrencyService
 
     @Environment(BiometricLockService.self) private var lockService
+    @Environment(DemoMode.self) private var demoMode
     @AppStorage(TickerService.refreshIntervalKey) private var refreshIntervalMinutes = 60
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
@@ -29,6 +30,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // MARK: Demo
+                if demoMode.isActive {
+                    Section {
+                        Button {
+                            afterDismissing(demoMode.exit)
+                        } label: {
+                            Label("Exit Demo Mode", systemImage: "xmark.circle")
+                        }
+                    } header: {
+                        Text("Demo Mode")
+                    } footer: {
+                        Text("You're viewing sample data. Changes aren't saved, and your own accounts, widget and backups aren't affected.")
+                    }
+                }
+
                 // MARK: Currency
                 Section {
                     Picker("Currency", selection: $currency.baseCurrency) {
@@ -65,97 +81,109 @@ struct SettingsView: View {
                     .disabled(currency.isLoading)
                 }
 
-                // MARK: Prices
-                Section {
-                    Picker("Refresh every", selection: $refreshIntervalMinutes) {
-                        Text("1 min").tag(1)
-                        Text("5 min").tag(5)
-                        Text("15 min").tag(15)
-                        Text("30 min").tag(30)
-                        Text("1 hour").tag(60)
-                        Text("2 hours").tag(120)
-                        Text("4 hours").tag(240)
-                    }
-                } header: {
-                    Text("Prices")
-                } footer: {
-                    Text("How often to refresh stock and fund prices when you open the app. Pull down on the dashboard to refresh immediately.")
-                }
-
-                // MARK: Security
-                Section {
-                    @Bindable var lock = lockService
-                    Toggle(isOn: $lock.isEnabled) {
-                        Label(securityToggleLabel, systemImage: securityToggleIcon)
-                    }
-                    .disabled(!lockService.canUseLock)
-                } header: {
-                    Text("Security")
-                } footer: {
-                    if lockService.canUseLock {
-                        Text("Require authentication when returning to the app after it moves to the background.")
-                    } else {
-                        Text("Set up a passcode in iPhone Settings to enable the app lock.")
-                    }
-                }
-
-                // MARK: Data
-                Section {
-                    // Export
-                    Button {
-                        exportData()
-                    } label: {
-                        Label("Export Data", systemImage: "square.and.arrow.up")
-                    }
-
-                    if let error = exportError {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-
-                    // Import
-                    Button {
-                        showingImportPicker = true
-                    } label: {
-                        Label("Import Data", systemImage: "square.and.arrow.down")
-                    }
-
-                    if let error = importError {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-
-                    // Import from CSV
-                    Button {
-                        showingCSVPicker = true
-                    } label: {
-                        Label("Import from CSV", systemImage: "tablecells")
-                    }
-
-                    if let error = csvError {
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-                } header: {
-                    Text("Data")
-                } footer: {
-                    Text("Export saves your accounts, holdings, balance history, net-worth history, and projection assumptions to a JSON file. Import replaces all existing data.\n\nImport from CSV adds accounts and holdings from a spreadsheet. Each row is an account (name, type, balance) or a holding (symbol, quantity, price); holdings attach to the account named in their row or the account row above them.")
-                }
-
-                // MARK: About
-                Section {
-                    Button {
-                        // Dismiss Settings first, then flip the flag — otherwise the
-                        // dashboard underneath would swap to OnboardingView while
-                        // this sheet is still on top.
-                        dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            hasCompletedOnboarding = false
+                // Everything below writes to real settings or real backups, so
+                // it's hidden while the app is running on sample data.
+                if !demoMode.isActive {
+                    // MARK: Prices
+                    Section {
+                        Picker("Refresh every", selection: $refreshIntervalMinutes) {
+                            Text("1 min").tag(1)
+                            Text("5 min").tag(5)
+                            Text("15 min").tag(15)
+                            Text("30 min").tag(30)
+                            Text("1 hour").tag(60)
+                            Text("2 hours").tag(120)
+                            Text("4 hours").tag(240)
                         }
-                    } label: {
-                        Label("Show Welcome Tour", systemImage: "sparkles")
+                    } header: {
+                        Text("Prices")
+                    } footer: {
+                        Text("How often to refresh stock and fund prices when you open the app. Pull down on the dashboard to refresh immediately.")
                     }
-                } header: {
-                    Text("About")
-                } footer: {
-                    Text("Re-runs the first-launch tour. Your accounts and data stay untouched.")
+
+                    // MARK: Security
+                    Section {
+                        @Bindable var lock = lockService
+                        Toggle(isOn: $lock.isEnabled) {
+                            Label(securityToggleLabel, systemImage: securityToggleIcon)
+                        }
+                        .disabled(!lockService.canUseLock)
+                    } header: {
+                        Text("Security")
+                    } footer: {
+                        if lockService.canUseLock {
+                            Text("Require authentication when returning to the app after it moves to the background.")
+                        } else {
+                            Text("Set up a passcode in iPhone Settings to enable the app lock.")
+                        }
+                    }
+
+                    // MARK: Data
+                    Section {
+                        // Export
+                        Button {
+                            exportData()
+                        } label: {
+                            Label("Export Data", systemImage: "square.and.arrow.up")
+                        }
+
+                        if let error = exportError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+
+                        // Import
+                        Button {
+                            showingImportPicker = true
+                        } label: {
+                            Label("Import Data", systemImage: "square.and.arrow.down")
+                        }
+
+                        if let error = importError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+
+                        // Import from CSV
+                        Button {
+                            showingCSVPicker = true
+                        } label: {
+                            Label("Import from CSV", systemImage: "tablecells")
+                        }
+
+                        if let error = csvError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                    } header: {
+                        Text("Data")
+                    } footer: {
+                        Text("Export saves your accounts, holdings, balance history, net-worth history, and projection assumptions to a JSON file. Import replaces all existing data.\n\nImport from CSV adds accounts and holdings from a spreadsheet. Each row is an account (name, type, balance) or a holding (symbol, quantity, price); holdings attach to the account named in their row or the account row above them.")
+                    }
+
+                    // MARK: About
+                    Section {
+                        Button {
+                            afterDismissing { hasCompletedOnboarding = false }
+                        } label: {
+                            Label("Show Welcome Tour", systemImage: "sparkles")
+                        }
+                    } header: {
+                        Text("About")
+                    } footer: {
+                        Text("Re-runs the first-launch tour. Your accounts and data stay untouched.")
+                    }
+
+                    // MARK: Demo entry
+                    Section {
+                        Button {
+                            afterDismissing(demoMode.enter)
+                        } label: {
+                            Label("Try with Sample Data", systemImage: "wand.and.stars")
+                        }
+                        if let error = demoMode.startError {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                    } footer: {
+                        Text("Explore the app with made-up accounts. Your own data is kept separate and is back as soon as you exit.")
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -210,6 +238,15 @@ struct SettingsView: View {
                     Text(csvConfirmMessage(for: csv))
                 }
             }
+        }
+    }
+
+    /// Dismiss Settings first, then run `action` — otherwise a root view swap
+    /// (onboarding, demo mode) would happen while this sheet is still on top.
+    private func afterDismissing(_ action: @escaping @MainActor () -> Void) {
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            MainActor.assumeIsolated { action() }
         }
     }
 
@@ -451,4 +488,5 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 #Preview {
     SettingsView(currency: CurrencyService())
         .modelContainer(ModelContainer.previewContainer)
+        .environment(DemoMode())
 }

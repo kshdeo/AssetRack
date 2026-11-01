@@ -33,6 +33,8 @@ enum BackgroundRefreshService {
 
     @MainActor
     private static func run(container: ModelContainer) async {
+        // Services would come up in demo mode and do nothing useful for the real store.
+        guard !DemoMode.sessionActive else { return }
         let context = ModelContext(container)
         let currency = CurrencyService()
         let ticker = TickerService()
