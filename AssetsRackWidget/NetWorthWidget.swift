@@ -52,7 +52,10 @@ private struct NetWorthProvider: TimelineProvider {
         return (0...60).map { minute in
             let entryDate = now.addingTimeInterval(TimeInterval(minute * 60))
             let label: String? = updatedAt.map { ageLabel(at: entryDate, updatedAt: $0) }
-            return WidgetEntry(date: entryDate, netWorth: netWorth, dailyChange: dailyChange,
+            // The stored change belongs to the day it was saved. Without this,
+            // Friday's change stays on screen all weekend if nothing refreshes.
+            let savedToday = updatedAt.map { Calendar.current.isDate($0, inSameDayAs: entryDate) } ?? false
+            return WidgetEntry(date: entryDate, netWorth: netWorth, dailyChange: savedToday ? dailyChange : 0,
                                currency: currency, updatedAt: updatedAt, ageLabel: label)
         }
     }
@@ -84,15 +87,21 @@ private struct ChangeRow: View {
     let entry: WidgetEntry
 
     private var changeColor: Color {
-        entry.dailyChange >= 0
+        if entry.dailyChange == 0 { return .white.opacity(0.6) }
+        return entry.dailyChange > 0
             ? Color(red: 0.2, green: 0.85, blue: 0.45)
             : Color(red: 1.0, green: 0.35, blue: 0.35)
+    }
+
+    private var changeSymbol: String {
+        if entry.dailyChange == 0 { return "minus" }
+        return entry.dailyChange > 0 ? "arrow.up.right" : "arrow.down.right"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 0) {
-                Image(systemName: entry.dailyChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                Image(systemName: changeSymbol)
                     .font(.system(size: 10, weight: .bold))
                 Text(" \(abs(entry.dailyChange).widgetFormatted(code: entry.currency))")
                     .font(.subheadline.weight(.medium))
@@ -166,7 +175,7 @@ private extension WidgetEntry {
         let base = netWorth - dailyChange
         guard abs(base) > 0.01 else { return nil }
         let pct = (dailyChange / abs(base)) * 100
-        return "\(pct >= 0 ? "+" : "")\(String(format: "%.2f", pct))%"
+        return "\(pct > 0 ? "+" : "")\(String(format: "%.2f", pct))%"
     }
 }
 

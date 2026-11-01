@@ -112,12 +112,21 @@ final class Holding {
     /// Returns nil when there's no previous close, the change is exactly zero, or
     /// the price didn't trade today (that would be the last session's change).
     var dailyChangePercent: Double? {
-        guard previousClose > 0 else { return nil }
-        if let tradedAt = lastPriceFetchedAt, tradedAt < Calendar.current.startOfDay(for: Date()) {
-            return nil
-        }
+        guard previousClose > 0, !marketIsIdleToday else { return nil }
         let pct = (lastPrice - previousClose) / previousClose
         return pct == 0 ? nil : pct
+    }
+
+    /// True when this price's last known trade was before today.
+    var marketIsIdleToday: Bool {
+        guard let tradedAt = lastPriceFetchedAt else { return false }
+        return tradedAt < Calendar.current.startOfDay(for: Date())
+    }
+
+    /// What the UI shows for today: 0 while the market is closed, never the last
+    /// session's change.
+    var displayedDailyChangePercent: Double? {
+        dailyChangePercent ?? (marketIsIdleToday ? 0 : nil)
     }
 
     init(tickerSymbol: String, quantity: Double, priceSource: PriceSource = .yahooFinance, isin: String = "") {
@@ -205,6 +214,13 @@ final class Account: Identifiable {
     /// a change from today.
     func marketIsIdleToday(now: Date = Date()) -> Bool {
         type.supportsHoldings && !holdings.isEmpty && !wasUpdatedToday(now: now)
+    }
+
+    /// What account rows show for today: 0 while the account's market is closed,
+    /// never the last session's change. Nil for holdings that have never been priced.
+    var displayedDailyChangePercent: Double? {
+        if let percent = dailyChangePercent() { return percent }
+        return marketIsIdleToday() && holdings.contains(where: \.marketIsIdleToday) ? 0 : nil
     }
 
     /// Interpret a change as a gain (true = green) or loss (false = red).
@@ -384,7 +400,10 @@ enum NetWorthMath {
             current.append(Money(account.signedBalance, account.currency))
         }
         let baseline = currency.sum(previous, in: base).amount
-        return (currency.sum(current, in: base).amount - baseline, previous.isEmpty ? nil : baseline)
+        let change = currency.sum(current, in: base).amount - baseline
+        // Summing the same values on both sides can leave floating-point dust,
+        // which would otherwise display as a red "−$0".
+        return (abs(change) < 0.005 ? 0 : change, previous.isEmpty ? nil : baseline)
     }
 }
 

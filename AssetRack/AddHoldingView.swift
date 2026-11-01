@@ -69,7 +69,7 @@ struct HoldingPriceView: View {
                 // more interesting signal. Fall back to the freshness
                 // timestamp (or "Not yet updated") when there's no prior
                 // price to compare against.
-                if let pct = holding.dailyChangePercent {
+                if let pct = holding.displayedDailyChangePercent {
                     ChangeBadge(percent: pct)
                 } else if let fetchedAt = holding.lastPriceFetchedAt {
                     Text("Updated \(fetchedAt.formatted(.relative(presentation: .named)))")

@@ -262,10 +262,11 @@ struct NetWorthHeroCard: View {
     /// obvious at a glance regardless of locale formatting quirks for negatives.
     @ViewBuilder
     private func todaysGainRow(_ gain: DashboardViewModel.TodaysGain) -> some View {
-        let isUp = gain.amount >= 0
-        let sign = isUp ? "+" : "−"
+        let isFlat = gain.amount == 0
+        let isUp = gain.amount > 0
+        let sign = isFlat ? "" : (isUp ? "+" : "−")
         HStack(spacing: 6) {
-            Image(systemName: isUp ? "arrow.up.right" : "arrow.down.right")
+            Image(systemName: isFlat ? "minus" : (isUp ? "arrow.up.right" : "arrow.down.right"))
             Text("\(sign)\(currencyService.formattedBase(abs(gain.amount)))")
                 .contentTransition(.numericText())
             if let percent = gain.percent {
@@ -276,7 +277,7 @@ struct NetWorthHeroCard: View {
                 .foregroundStyle(.secondary)
         }
         .font(.subheadline.weight(.medium))
-        .foregroundStyle(isUp ? Color.green : Color.red)
+        .foregroundStyle(isFlat ? Color.secondary : (isUp ? Color.green : Color.red))
     }
 }
 

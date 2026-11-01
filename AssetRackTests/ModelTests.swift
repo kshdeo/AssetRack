@@ -482,8 +482,44 @@ struct ClosedMarketTests {
         #expect(account.dailyChangePercent() == nil)
         #expect(account.holdings[0].dailyChangePercent == nil)
         expectClose(NetWorthMath.todaysChange(accounts: [account], currency: currency), 0)
-        #expect(recalculated([account]).todaysGain == nil)
         #expect(recalculated([account]).topMovers.isEmpty)
+    }
+
+    @Test func closedMarketDisplaysZeroEverywhere() throws {
+        let account = brokerage(tradedAt: daysAgo(2))
+        #expect(account.displayedDailyChangePercent == 0)
+        #expect(account.holdings[0].displayedDailyChangePercent == 0)
+        let gain = try #require(recalculated([account]).todaysGain)
+        #expect(gain.amount == 0)
+        #expect(gain.percent == 0)
+    }
+
+    @Test func floatingPointDustIsExactlyZero() {
+        // Non-terminating values through FX, on both sides of the subtraction.
+        let accounts = (1...7).map { index in
+            makeAccount(in: context, type: .brokerage, balance: 1_000.1 / Double(index), currency: "USD",
+                        history: [(900, daysAgo(2))],
+                        holdings: [makeHolding(quantity: 1, lastPrice: 1, fetchedAt: daysAgo(2))])
+        }
+        #expect(NetWorthMath.todaysChange(accounts: accounts, currency: currency) == 0)
+    }
+
+    @Test func tradingDayDisplaysTheRealChange() {
+        let account = brokerage(tradedAt: Date())
+        expectClose(account.displayedDailyChangePercent, 0.1)
+        expectClose(account.holdings[0].displayedDailyChangePercent, (110.0 - 112.0) / 112.0)
+    }
+
+    @Test func neverPricedHoldingsDisplayNoChange() {
+        let account = makeAccount(in: context, type: .brokerage, balance: 0,
+                                  holdings: [makeHolding(quantity: 1, lastPrice: 0)])
+        #expect(account.displayedDailyChangePercent == nil)
+        #expect(account.holdings[0].displayedDailyChangePercent == nil)
+    }
+
+    @Test func manualAccountWithNoChangeTodayStillHasNoBadge() {
+        let cash = makeAccount(in: context, balance: 500, history: [(500, daysAgo(1))])
+        #expect(cash.displayedDailyChangePercent == nil)
     }
 
     @Test func aTradeTodayStillCounts() throws {

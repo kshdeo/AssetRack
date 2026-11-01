@@ -366,11 +366,11 @@ final class DashboardViewModel {
 
     // MARK: - Today's gain
 
-    /// Nil when nothing changed today, so a closed market shows no "today" row
-    /// at all rather than the last session's move or "+$0".
+    /// Zero while markets are closed, never the last session's move. Nil only when
+    /// there's no earlier history to compare against.
     private func computeTodaysGain(accounts: [Account], currency: CurrencyService) -> TodaysGain? {
         let (amount, baseline) = NetWorthMath.todaysChangeAndBaseline(accounts: accounts, currency: currency)
-        guard let baseline, abs(amount) >= 0.005 else { return nil }
+        guard let baseline else { return nil }
         return TodaysGain(amount: amount, percent: baseline != 0 ? amount / abs(baseline) : nil)
     }
 

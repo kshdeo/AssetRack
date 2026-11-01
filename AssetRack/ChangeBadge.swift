@@ -8,7 +8,7 @@ import SwiftUI
 ///
 /// Styling rule: the arrow carries the green/red signal; the text sits in
 /// `.secondary` so the badge stays calm and doesn't compete with primary
-/// numbers nearby. The compact (no-label) variant uses `caption2`; the
+/// numbers nearby. Exactly zero is neutral: a grey dash, no direction. The compact (no-label) variant uses `caption2`; the
 /// labelled variant bumps up to `footnote` for dashboard prominence.
 ///
 /// - Parameters:
@@ -24,13 +24,14 @@ struct ChangeBadge: View {
 
     var body: some View {
         let positive = percent >= 0
+        let isFlat = percent == 0
         let gainFlag = isGain ?? positive
         let isLarge  = label != nil
 
         HStack(spacing: isLarge ? 4 : 3) {
-            Image(systemName: positive ? "arrow.up" : "arrow.down")
+            Image(systemName: isFlat ? "minus" : (positive ? "arrow.up" : "arrow.down"))
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(gainFlag ? Color.green : Color.red)
+                .foregroundStyle(isFlat ? Color.secondary : (gainFlag ? Color.green : Color.red))
             Text(percentText(isLarge: isLarge))
                 .font(isLarge ? .footnote : .caption2)
                 .foregroundStyle(.secondary)
@@ -60,6 +61,7 @@ struct ChangeBadge: View {
             ChangeBadge(percent:  0.0050)
             ChangeBadge(percent: -0.0123)
             ChangeBadge(percent:  0.0020, isGain: false)   // mortgage going up
+            ChangeBadge(percent:  0)                       // market closed
         }
     }
     .padding()
