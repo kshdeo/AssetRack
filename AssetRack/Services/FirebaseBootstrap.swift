@@ -2,10 +2,10 @@ import Foundation
 import FirebaseAppCheck
 import FirebaseCore
 
-/// Starts Firebase if `GoogleService-Info.plist` is in the bundle. The plist is
-/// gitignored, so a fresh checkout can lack it: `FirebaseApp.configure()` would
-/// crash there, so the app runs without Firebase instead. Remote Config stays on
-/// in-app defaults and Yahoo search reports itself as unavailable.
+/// Starts Firebase if `GoogleService-Info.plist` is in the bundle. Without it
+/// `FirebaseApp.configure()` would crash, so the app runs without Firebase
+/// instead: Remote Config stays on in-app defaults and Yahoo search reports
+/// itself as unavailable.
 enum FirebaseBootstrap {
     private(set) static var isConfigured = false
 
