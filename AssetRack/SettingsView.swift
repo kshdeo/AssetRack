@@ -185,6 +185,20 @@ struct SettingsView: View {
                         Text("Explore the app with made-up accounts. Your own data is kept separate and is back as soon as you exit.")
                     }
                 }
+
+                #if DEBUG
+                // MARK: Developer
+                if !demoMode.isActive {
+                    Section {
+                        @Bindable var config = ConfigService.shared
+                        Toggle("Force Statement Scan On", isOn: $config.debugForceStatementScan)
+                    } header: {
+                        Text("Developer")
+                    } footer: {
+                        Text("Debug builds only. Shows statement scanning even when statement_scan_enabled is off.")
+                    }
+                }
+                #endif
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

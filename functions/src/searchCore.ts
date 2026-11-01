@@ -95,3 +95,57 @@ export async function fetchFinnhubSearch(
     type: String(item.type ?? ""),
   }));
 }
+
+export interface SearchRequest {
+  method: string;
+  appCheckToken: string | undefined;
+  body: unknown;
+}
+
+export interface SearchDeps {
+  /** Rejects if the App Check token isn't valid. */
+  verifyAppCheck: (token: string) => Promise<unknown>;
+  cache: TtlCache<SearchSymbol[]>;
+  limiter: WindowRateLimiter;
+  fetchSearch: (query: string) => Promise<SearchSymbol[]>;
+  onUpstreamError: (error: unknown) => void;
+}
+
+export interface SearchResponse {
+  status: number;
+  body: {result: SearchSymbol[]} | {error: string};
+}
+
+/**
+ * The whole request flow, in cost order: nothing past the App Check step runs,
+ * and no Finnhub quota is spent, for an unverified caller.
+ */
+export async function handleSearch(request: SearchRequest, deps: SearchDeps): Promise<SearchResponse> {
+  if (request.method !== "POST") return {status: 405, body: {error: "Method not allowed"}};
+
+  if (!request.appCheckToken) return {status: 401, body: {error: "Unauthorized"}};
+  try {
+    await deps.verifyAppCheck(request.appCheckToken);
+  } catch {
+    return {status: 401, body: {error: "Unauthorized"}};
+  }
+
+  const query = normalizeQuery((request.body as {q?: unknown} | null | undefined)?.q);
+  if (query === null) return {status: 400, body: {error: "Enter a search of 1 to 64 characters."}};
+
+  const cached = deps.cache.get(query);
+  if (cached) return {status: 200, body: {result: cached}};
+
+  const tooMany: SearchResponse = {status: 429, body: {error: "Too many searches. Try again shortly."}};
+  if (!deps.limiter.tryAcquire()) return tooMany;
+
+  try {
+    const result = await deps.fetchSearch(query);
+    deps.cache.set(query, result);
+    return {status: 200, body: {result}};
+  } catch (error) {
+    if (error instanceof UpstreamRateLimitError) return tooMany;
+    deps.onUpstreamError(error);
+    return {status: 503, body: {error: "Search is unavailable right now."}};
+  }
+}

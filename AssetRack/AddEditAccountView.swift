@@ -106,7 +106,7 @@ struct AddEditAccountView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if !isEditing {
+                if !isEditing && ConfigService.shared.statementScanEnabled {
                     scanSection
                 }
 

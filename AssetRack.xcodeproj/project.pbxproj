@@ -10,7 +10,6 @@
 		7DF1BA102FF0000000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7DF1BA202FF0000000000001 /* FirebaseCore */; };
 		7DF1BA112FF0000000000001 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 7DF1BA212FF0000000000001 /* FirebaseAppCheck */; };
 		7DF1BA122FF0000000000001 /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = 7DF1BA222FF0000000000001 /* FirebaseRemoteConfig */; };
-		7DF1BA132FF0000000000001 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 7DF1BA232FF0000000000001 /* FirebaseFunctions */; };
 		7DBDA43C2FE727B2004177C9 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7DBDA43B2FE727B2004177C9 /* WidgetKit.framework */; };
 		7DBDA43E2FE727B2004177C9 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7DBDA43D2FE727B2004177C9 /* SwiftUI.framework */; };
 		7DBDA44F2FE727B4004177C9 /* AssetsRackWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7DBDA4392FE727B2004177C9 /* AssetsRackWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -119,7 +118,6 @@
 				7DF1BA102FF0000000000001 /* FirebaseCore in Frameworks */,
 				7DF1BA112FF0000000000001 /* FirebaseAppCheck in Frameworks */,
 				7DF1BA122FF0000000000001 /* FirebaseRemoteConfig in Frameworks */,
-				7DF1BA132FF0000000000001 /* FirebaseFunctions in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,7 +206,6 @@
 				7DF1BA202FF0000000000001 /* FirebaseCore */,
 				7DF1BA212FF0000000000001 /* FirebaseAppCheck */,
 				7DF1BA222FF0000000000001 /* FirebaseRemoteConfig */,
-				7DF1BA232FF0000000000001 /* FirebaseFunctions */,
 			);
 			productName = AssetRack;
 			productReference = 7D2F86F92FB3D40400EF63A1 /* AssetRack.app */;
@@ -808,11 +805,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7DF1BA002FF0000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseRemoteConfig;
-		};
-		7DF1BA232FF0000000000001 /* FirebaseFunctions */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 7DF1BA002FF0000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseFunctions;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
