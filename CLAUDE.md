@@ -36,7 +36,7 @@ AssetRack is an iOS Net Worth Tracker — a personal finance app for tracking **
 - **Swift Charts** — built-in from iOS 16, handles area charts, interactive scrubbing
 - **LocalAuthentication** — biometric lock (Face ID / Touch ID / passcode fallback) in `BiometricLockService`
 - **Vision + FoundationModels** — `StatementScanner` uses `VNRecognizeTextRequest` for OCR then Apple Intelligence (`FoundationModels`, iOS 26+) for structured extraction. Guarded by `#if canImport(FoundationModels)` + `@available(iOS 26.0, *)` so the rest of the app builds on 18.2.
-- **Firebase (SPM, pinned to 12.14.x)** — App Check, Remote Config and Functions only, no Analytics. 12.14 is the newest release that resolves on Xcode 16.2 (later ones need Swift tools 6.1+). Other than Firebase, the only planned third-party integration is Plaid (Phase 2, requires backend)
+- **Firebase (SPM, pinned to 12.14.x)** — Core, App Check and Remote Config only, to keep dependencies minimal. No Functions SDK, Analytics or Crashlytics. 12.14 is the newest release that resolves on Xcode 16.2 (later ones need Swift tools 6.1+). Other than Firebase, the only planned third-party integration is Plaid (Phase 2, requires backend)
 
 ## Data Model Design Decisions
 
@@ -237,7 +237,7 @@ Two-stage pipeline, iOS 26+ only:
 1. `VNRecognizeTextRequest` runs OCR on a `UIImage` (background thread via `withCheckedThrowingContinuation`)
 2. `FoundationModels.LanguageModelSession` extracts structured fields (`@Generable ExtractedAccountSchema`) from the raw text
 
-`AddEditAccountView` shows the scanner entry point via `PhotosPicker` in the "add" flow only. The picker writes to `pendingScanItem`; a `.task(id: pendingScanItem)` reacts and calls `performScan(_:)`, which merges results into the form without overwriting already-filled fields. The entry point is always visible but disabled with an explanatory subtitle when Apple Intelligence isn't available.
+`AddEditAccountView` shows the scanner entry point via `PhotosPicker` in the "add" flow only. The picker writes to `pendingScanItem`; a `.task(id: pendingScanItem)` reacts and calls `performScan(_:)`, which merges results into the form without overwriting already-filled fields. The entry point only exists when `ConfigService.statementScanEnabled` is on; when on, it's visible but disabled with an explanatory subtitle if Apple Intelligence isn't available.
 
 ### TickerService threading
 `fetch(context:currency:)` and `fetchIfNeeded(context:currency:)` are both `@MainActor` to satisfy Swift 6 Sendability requirements for `ModelContext`.
@@ -285,9 +285,9 @@ account.setBalanceSnapshot(balance: balance, at: date)
 - Dashboard `ProjectionTeaserCard` shows the projected value at the saved horizon and navigates to the full view.
 
 ### Firebase
-- `functions/` (TypeScript) has the callable `search`, which proxies Finnhub `/api/v1/search`. It enforces App Check, reads `FINNHUB_API_KEY` from Secret Manager, caches for an hour, and limits Finnhub calls to 50 a minute. `maxInstances: 1` keeps the cache and limiter global. Test with `npm test` in `functions/`. No API keys in the app.
+- `functions/` (TypeScript) has the HTTPS function `search`, which proxies Finnhub `/api/v1/search`. The app calls it with `URLSession` and an `X-Firebase-AppCheck` header; the function verifies that token itself, reads `FINNHUB_API_KEY` from Secret Manager, caches for an hour, and limits Finnhub calls to 50 a minute. `maxInstances: 1` keeps the cache and limiter global. Test with `npm test` in `functions/`. No API keys in the app.
 - `GoogleService-Info.plist` belongs in `AssetRack/AssetRack/` (picked up automatically by the synced folder) and is gitignored. Without it the app still builds and runs: `FirebaseBootstrap.isConfigured` stays false, Remote Config stays on defaults, and Yahoo search shows "isn't available" while manual ticker entry keeps working.
-- Remote Config keys: `min_supported_version` (string; older versions see a dismissible prompt, never a block) and `finnhub_search_enabled` (bool; hides Yahoo search). Add new keys in `ConfigService`, with an in-app default.
+- Remote Config keys: `min_supported_version` (string; older versions see a dismissible prompt, never a block) and `finnhub_search_enabled` (bool; hides Yahoo search), `statement_scan_enabled` (bool, default false; hides statement scanning, with a DEBUG-only override in Settings → Developer). Add new keys in `ConfigService`, with an in-app default.
 - App Check: App Attest on Release device builds, debug provider in DEBUG and the simulator (register the token it prints in the Firebase console).
 - The function region is set in both `functions/src/index.ts` and `ISINLookupService.functionsRegion`.
 

@@ -1,4 +1,5 @@
-import FirebaseFunctions
+import FirebaseAppCheck
+import FirebaseCore
 import Foundation
 
 // MARK: - Result type
@@ -24,6 +25,10 @@ struct ISINLookupService {
 
     /// Keep in sync with the region in functions/src/index.ts.
     private static let functionsRegion = "europe-west1"
+
+    static func searchEndpoint(projectID: String) -> URL {
+        URL(string: "https://\(functionsRegion)-\(projectID).cloudfunctions.net/search")!
+    }
 
     // MARK: - Tradegate search (returns ISIN directly in results)
 
@@ -143,26 +148,35 @@ struct ISINLookupService {
     // MARK: - Finnhub search (for Yahoo Finance symbol discovery)
 
     /// Search for securities by name or ticker through the `search` Cloud
-    /// Function, which holds the Finnhub key. The Functions SDK attaches the App
-    /// Check token the function requires.
+    /// Function, which holds the Finnhub key and verifies the App Check token.
     func search(query: String) async throws -> [StockSearchResult] {
-        guard FirebaseBootstrap.isConfigured else { throw LookupError.searchUnavailable }
-        let callable = Functions.functions(region: Self.functionsRegion).httpsCallable(
-            "search",
-            requestAs: FinnhubSearchRequest.self,
-            responseAs: FinnhubSearchResponse.self
-        )
-        let decoded: FinnhubSearchResponse
+        guard FirebaseBootstrap.isConfigured,
+              let projectID = FirebaseApp.app()?.options.projectID else {
+            throw LookupError.searchUnavailable
+        }
+        var request = URLRequest(url: Self.searchEndpoint(projectID: projectID))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(FinnhubSearchRequest(q: query))
+
+        let data: Data
+        let response: URLResponse
         do {
-            decoded = try await callable.call(FinnhubSearchRequest(q: query))
+            let appCheckToken = try await AppCheck.appCheck().token(forcingRefresh: false)
+            request.setValue(appCheckToken.token, forHTTPHeaderField: "X-Firebase-AppCheck")
+            (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             // A newer keystroke superseded this search — not an error.
             if Task.isCancelled { throw CancellationError() }
-            let nsError = error as NSError
-            if nsError.domain == FunctionsErrorDomain,
-               nsError.code == FunctionsErrorCode.resourceExhausted.rawValue {
-                throw LookupError.tooManySearches
-            }
+            throw LookupError.searchUnavailable
+        }
+
+        switch (response as? HTTPURLResponse)?.statusCode {
+        case 200: break
+        case 429: throw LookupError.tooManySearches
+        default:  throw LookupError.searchUnavailable
+        }
+        guard let decoded = try? JSONDecoder().decode(FinnhubSearchResponse.self, from: data) else {
             throw LookupError.searchUnavailable
         }
         return decoded.result.map {

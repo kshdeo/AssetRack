@@ -1,31 +1,35 @@
+import {initializeApp} from "firebase-admin/app";
+import {getAppCheck} from "firebase-admin/app-check";
 import {defineSecret} from "firebase-functions/params";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {onRequest} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import {
   fetchFinnhubSearch,
-  normalizeQuery,
+  handleSearch,
   SearchSymbol,
   TtlCache,
-  UpstreamRateLimitError,
   WindowRateLimiter,
 } from "./searchCore";
+
+initializeApp();
 
 const finnhubApiKey = defineSecret("FINNHUB_API_KEY");
 
 // Both are per instance. `maxInstances: 1` below makes them effectively global.
 const cache = new TtlCache<SearchSymbol[]>(500, 60 * 60 * 1000);
 // Stays under Finnhub's free-tier limit of 60 calls a minute.
-const upstreamLimiter = new WindowRateLimiter(50, 60 * 1000);
+const limiter = new WindowRateLimiter(50, 60 * 1000);
 
 /**
- * Security search for the app's Add Holding screen. Request `{q}`, response
- * `{result}` (same shape as Finnhub's). Queries aren't logged: what someone
- * looks up hints at what they hold.
+ * Security search for the app's Add Holding screen. `POST {q}` with an App Check
+ * token in `X-Firebase-AppCheck`; responds `{result}` (same shape as Finnhub's).
+ * Public at the network level because App Check is the gate (see `handleSearch`).
+ * Queries aren't logged: what someone looks up hints at what they hold.
  */
-export const search = onCall(
+export const search = onRequest(
   {
     region: "europe-west1", // Keep in sync with ISINLookupService.functionsRegion.
-    enforceAppCheck: true,
+    invoker: "public",
     secrets: [finnhubApiKey],
     maxInstances: 1,
     concurrency: 80,
@@ -33,31 +37,19 @@ export const search = onCall(
     memory: "256MiB",
     timeoutSeconds: 10,
   },
-  async (request) => {
-    const query = normalizeQuery((request.data as {q?: unknown} | null)?.q);
-    if (query === null) {
-      throw new HttpsError("invalid-argument", "Enter a search of 1 to 64 characters.");
-    }
-
-    const cached = cache.get(query);
-    if (cached) return {result: cached};
-
-    if (!upstreamLimiter.tryAcquire()) {
-      throw new HttpsError("resource-exhausted", "Too many searches. Try again shortly.");
-    }
-
-    try {
-      const result = await fetchFinnhubSearch(query, finnhubApiKey.value());
-      cache.set(query, result);
-      return {result};
-    } catch (error) {
-      if (error instanceof UpstreamRateLimitError) {
-        throw new HttpsError("resource-exhausted", "Too many searches. Try again shortly.");
-      }
-      logger.error("Finnhub search failed", {
-        error: error instanceof Error ? error.message : "unknown",
-      });
-      throw new HttpsError("unavailable", "Search is unavailable right now.");
-    }
+  async (req, res) => {
+    const {status, body} = await handleSearch(
+      {method: req.method, appCheckToken: req.header("X-Firebase-AppCheck"), body: req.body},
+      {
+        verifyAppCheck: (token) => getAppCheck().verifyToken(token),
+        cache,
+        limiter,
+        fetchSearch: (query) => fetchFinnhubSearch(query, finnhubApiKey.value()),
+        onUpstreamError: (error) => logger.error("Finnhub search failed", {
+          error: error instanceof Error ? error.message : "unknown",
+        }),
+      },
+    );
+    res.status(status).json(body);
   },
 );

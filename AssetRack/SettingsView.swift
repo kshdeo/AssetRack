@@ -157,6 +157,18 @@ struct SettingsView: View {
                 } footer: {
                     Text("Re-runs the first-launch tour. Your accounts and data stay untouched.")
                 }
+
+                #if DEBUG
+                // MARK: Developer
+                Section {
+                    @Bindable var config = ConfigService.shared
+                    Toggle("Force Statement Scan On", isOn: $config.debugForceStatementScan)
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    Text("Debug builds only. Shows statement scanning even when statement_scan_enabled is off.")
+                }
+                #endif
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

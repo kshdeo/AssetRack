@@ -11,15 +11,34 @@ final class ConfigService {
     private enum Key {
         static let minSupportedVersion  = "min_supported_version"
         static let finnhubSearchEnabled = "finnhub_search_enabled"
+        static let statementScanEnabled = "statement_scan_enabled"
     }
 
     private static let defaultMinSupportedVersion = "0"
     private static let defaultFinnhubSearchEnabled = true
+    private static let defaultStatementScanEnabled = false
 
     /// Oldest app version still supported. Older versions get an update prompt.
     private(set) var minSupportedVersion = ConfigService.defaultMinSupportedVersion
     /// Kill switch for the Yahoo holding search, which goes through the Firebase proxy.
     private(set) var finnhubSearchEnabled = ConfigService.defaultFinnhubSearchEnabled
+    private var remoteStatementScanEnabled = ConfigService.defaultStatementScanEnabled
+
+    /// Whether to show bank statement scanning. Off until it's turned on remotely.
+    var statementScanEnabled: Bool {
+        #if DEBUG
+        if debugForceStatementScan { return true }
+        #endif
+        return remoteStatementScanEnabled
+    }
+
+    #if DEBUG
+    /// Local override for testing the feature with the remote flag off. Compiled
+    /// out of Release builds, so it can't enable anything for real users.
+    var debugForceStatementScan = UserDefaults.standard.bool(forKey: "debug_force_statement_scan") {
+        didSet { UserDefaults.standard.set(debugForceStatementScan, forKey: "debug_force_statement_scan") }
+    }
+    #endif
 
     var isUpdateRequired: Bool {
         let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -41,6 +60,7 @@ final class ConfigService {
         remoteConfig.setDefaults([
             Key.minSupportedVersion:  Self.defaultMinSupportedVersion as NSString,
             Key.finnhubSearchEnabled: Self.defaultFinnhubSearchEnabled as NSNumber,
+            Key.statementScanEnabled: Self.defaultStatementScanEnabled as NSNumber,
         ])
         do {
             _ = try await remoteConfig.fetchAndActivate()
@@ -49,6 +69,7 @@ final class ConfigService {
         }
         minSupportedVersion = remoteConfig.configValue(forKey: Key.minSupportedVersion).stringValue
         finnhubSearchEnabled = remoteConfig.configValue(forKey: Key.finnhubSearchEnabled).boolValue
+        remoteStatementScanEnabled = remoteConfig.configValue(forKey: Key.statementScanEnabled).boolValue
     }
 
     /// Dotted numeric comparison where missing parts count as 0, so "1.0" equals
