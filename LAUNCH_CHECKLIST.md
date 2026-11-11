@@ -7,24 +7,30 @@ Tags: **[P0]** blocks launch · **[P1]** should fix · **[You]** needs you (port
 
 ## Followups
 
-- [ ] [P0] [You] Revoke the hardcoded Finnhub fallback key on finnhub.io
-  - It's in git history at commit `63c787e` (`ISINLookupService.swift:25`); removing it from code isn't enough.
-- [ ] [P0] Remove the Finnhub fallback key from code
+- [ ] [P0] [You] Replace the old Finnhub key in the `FINNHUB_API_KEY` secret, redeploy, then revoke it on finnhub.io
+  - It's in git history at commit `63c787e` (`ISINLookupService.swift:25`) and is what the live `search` function uses, so revoking it first breaks search. Set the new key with `firebase functions:secrets:set FINNHUB_API_KEY`, then `firebase deploy --only functions`.
+- [x] [P0] Remove the Finnhub fallback key from code (done 2026-11-01)
   - Require a user-supplied key, or route search through a proxy you control.
-- [ ] [P1] Fix Settings footer copy
+- [x] [P1] Fix Settings footer copy — no longer applies, key field removed (done 2026-11-01)
   - `SettingsView.swift:116` says the key is for Tradegate; it's actually used for Yahoo search, and the copy implies it's required.
-- [ ] [P1] Verify "No Finnhub API key configured" messaging
+- [x] [P1] Verify "No Finnhub API key configured" messaging — no longer applies, key field removed (done 2026-11-01)
   - `ISINLookupService.swift:229` becomes reachable once the fallback is gone; the user should see a helpful prompt, not a dead end.
-- [ ] [You] Delete local branch `backup/main-pre-rebase`
+- [x] [You] Delete local branch `backup/main-pre-rebase` (done 2026-11-11)
   - Only once rebased main is confirmed good.
-- [ ] [P0] [You] Xcode build + run of current main
+- [x] [P0] [You] Xcode build + run of current main (done 2026-11-01)
   - Rebased, not yet built.
 - [ ] [You] Create an App Store Connect API key
   - For scripting Xcode Cloud workflow edits via the `ciWorkflows` API.
-- [ ] [You] Set up Firebase
+- [x] [You] Set up Firebase (done 2026-11-11)
   - Create project → Blaze plan + budget alert → register iOS app → enable App Attest in App Check → set `FINNHUB_API_KEY` secret → deploy `functions/` → add `GoogleService-Info.plist` to `AssetRack/` and commit it (BUNDLE_ID `com.blackforestapps.assetsRack`; restrict its API key to that bundle ID).
 - [ ] Enable `statement_scan_enabled` in Remote Config
   - Once bank statement scanning is ready (default is off).
+- [ ] [P0] [You] Get a green Xcode Cloud archive
+  - Build 24 failed: App Attest wasn't enabled on the App ID. It's enabled now; the next build (likely triggered by the `ad0b8c2` push) is the first test.
+- [ ] [P1] Review the 6 moderate `npm audit` warnings in `functions/`
+  - Production dependencies (incl. `minimatch`); fix and redeploy rather than running `npm audit fix` blind.
+- [ ] Disable or destroy version 1 of the `FINNHUB_API_KEY` secret
+  - Unused; it holds the key pasted three times. `firebase functions:secrets:destroy FINNHUB_API_KEY@1`.
 
 ## Data safety & persistence
 
@@ -79,6 +85,8 @@ Tags: **[P0]** blocks launch · **[P1]** should fix · **[You]** needs you (port
 - [ ] [P1] [You] Run the unit + UI test suites in Xcode
 - [ ] Fix any Xcode warnings / consider Swift 6 language mode
   - Currently `SWIFT_VERSION = 5.0`.
+- [ ] [P1] [You] Check today's change on a weekend and on a trading day
+  - Fix is on `main` (`0f30052`). Closed market: dashboard, rows and widget show a neutral 0; trading day: real values. Tradegate holidays aren't modelled (`TradegateSession` in `TickerService.swift`), so they count as trading days.
 
 ## Build & project settings
 
@@ -106,7 +114,7 @@ Tags: **[P0]** blocks launch · **[P1]** should fix · **[You]** needs you (port
 - [ ] [P0] [You] Category: Finance; pricing and availability
 - [ ] Export compliance
   - `ITSAppUsesNonExemptEncryption = NO` is already set.
-- [ ] [P0] Implement a Demo mode for App Review
+- [x] [P0] Implement a Demo mode for App Review (done 2026-11-01)
   - One-tap "Try with sample data" (onboarding and Settings) with sample accounts, holdings, history and projections; no real credentials, API key or live APIs (stub prices/FX). Isolated from real data; no widget or backup writes.
 - [ ] [P1] [You] Review notes: no login, no account linking, data stays on-device; how to enter Demo mode; how to test the scanner
   - Spell out the exact taps to reach Demo mode.
