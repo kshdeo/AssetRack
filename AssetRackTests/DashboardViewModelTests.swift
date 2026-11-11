@@ -290,12 +290,39 @@ struct PeriodDeltaTests {
         expectClose(vm.weekDelta, 0.1)
     }
 
-    @Test func monthDeltaAgainstThirtyDayOldSnapshot() {
-        let account = makeAccount(in: context, balance: 1_100, history: [(1_000, daysAgo(30))])
+    @Test func monthDeltaAgainstMonthOldSnapshot() {
+        let account = makeAccount(in: context, balance: 1_100, history: [(1_000, ago(.month, 1))])
         let vm = recalculated([account])
         expectClose(vm.monthDelta, 0.1)
-        // Nearest date to the -7d anchor is today itself -> no distinct week reference.
-        #expect(vm.weekDelta == nil)
+    }
+
+    @Test func sparseHistoryIsInterpolatedAtTheAnchor() {
+        // Points 15 and 7 months ago; the 12-month baseline lies between them.
+        let d15 = ago(.month, 15), d7 = ago(.month, 7)
+        let account = makeAccount(in: context, balance: 2_000,
+                                  history: [(1_000, d15), (1_800, d7)])
+        let vm = recalculated([account])
+
+        let day = { Calendar.current.startOfDay(for: $0) }
+        let fraction = day(ago(.year, 1)).timeIntervalSince(day(d15)) / day(d7).timeIntervalSince(day(d15))
+        let baseline = 1_000 + 800 * fraction
+        expectClose(vm.yearDelta, (2_000 - baseline) / baseline)
+    }
+
+    @Test func interpolatesTowardsTodayWhenNoLaterPoint() {
+        // Only a point 30 days back: the week baseline sits between it and today.
+        let account = makeAccount(in: context, balance: 1_100, history: [(1_000, daysAgo(30))])
+        let vm = recalculated([account])
+        let baseline = 1_000 + 100 * (23.0 / 30.0)
+        expectClose(vm.weekDelta, (1_100 - baseline) / baseline, tolerance: 1e-3)
+    }
+
+    @Test func nilWhenHistoryIsShorterThanThePeriod() {
+        // 7 months of history must not be shown as a year-on-year change.
+        let account = makeAccount(in: context, balance: 1_100, history: [(1_000, ago(.month, 7))])
+        let vm = recalculated([account])
+        #expect(vm.yearDelta == nil)
+        #expect(vm.monthDelta != nil)
     }
 
     @Test func nilWhenOnlyTodayExists() {
@@ -305,6 +332,10 @@ struct PeriodDeltaTests {
         #expect(vm.monthDelta == nil)
         #expect(vm.yearDelta == nil)
     }
+}
+
+private func ago(_ component: Calendar.Component, _ value: Int) -> Date {
+    Calendar.current.date(byAdding: component, value: -value, to: Date())!
 }
 
 // MARK: - History range & downsampling
@@ -350,7 +381,7 @@ struct HistoryRangeTests {
     @Test func periodDeltasIgnoreChartRange() {
         // Chart shows 3 months, but y/y must still resolve from full history.
         let account = makeAccount(in: context, balance: 1_100,
-                                  history: [(1_000, daysAgo(365))])
+                                  history: [(1_000, ago(.year, 1))])
         let vm = DashboardViewModel()
         vm.recalculate(accounts: [account], currency: makeCurrency(), historyRange: .threeMonths)
         expectClose(vm.yearDelta, 0.1)

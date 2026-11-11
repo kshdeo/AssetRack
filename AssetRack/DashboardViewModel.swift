@@ -380,12 +380,23 @@ final class DashboardViewModel {
         guard let last = dailyTotals.last else { return nil }
 
         let anchor = Calendar.current.date(byAdding: component, value: value, to: last.date)!
-        guard let prev = dailyTotals.min(by: {
-            abs($0.date.timeIntervalSince(anchor)) < abs($1.date.timeIntervalSince(anchor))
-        }), prev.date != last.date else { return nil }
+        guard let prev = Self.interpolatedTotal(at: anchor, in: dailyTotals), prev != 0 else { return nil }
+        return (last.total - prev) / abs(prev)
+    }
 
-        guard prev.total != 0 else { return nil }
-        return (last.total - prev.total) / abs(prev.total)
+    /// Total at `date`, linearly interpolated between the recorded days on
+    /// either side of it, so sparse history (e.g. points 15 and 7 months ago)
+    /// still gives a fair 12-month baseline instead of snapping to the nearer
+    /// point. Nil when history doesn't reach back to `date`: a "y/y" built from
+    /// a shorter span would be mislabelled. `totals` must be ascending.
+    static func interpolatedTotal(at date: Date, in totals: [DayTotals]) -> Double? {
+        guard let beforeIndex = totals.lastIndex(where: { $0.date <= date }) else { return nil }
+        let before = totals[beforeIndex]
+        guard before.date < date, beforeIndex + 1 < totals.count else { return before.total }
+
+        let after = totals[beforeIndex + 1]
+        let fraction = date.timeIntervalSince(before.date) / after.date.timeIntervalSince(before.date)
+        return before.total + (after.total - before.total) * fraction
     }
 
     // MARK: - Allocation
